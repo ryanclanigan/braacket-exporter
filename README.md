@@ -64,7 +64,7 @@ Processes the queue sequentially, one tournament at a time.
 Use this as the normal command for ongoing imports.
 
 What it does:
-- requeues stale `in_progress` tournaments left behind by a killed or interrupted process
+- requeues any `in_progress` tournaments left behind by a killed or interrupted process
 - imports queued and retryable tournaments in order
 - logs which tournament is currently being processed
 - stores raw source pages and rewrites normalized rows transactionally per tournament
@@ -98,7 +98,7 @@ Use this when:
 ## Operational Notes
 
 - All HTTP work is sequential. There is no request parallelism and no multi-tournament parallelism.
-- `sync run` recovers stale `in_progress` tournaments before continuing.
+- `sync run` immediately recovers any `in_progress` tournaments before continuing.
 - Tournament imports are rewrite-based. On a failed attempt, partial normalized rows are not kept.
 - The `tournaments` table stores both `date_text` and normalized `tournament_date` (`YYYY-MM-DD`) when the event page exposes a parseable date.
 - Progress logging is written to stdout during discovery and tournament imports so you can see what is happening in long runs.

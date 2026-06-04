@@ -17,8 +17,7 @@ export const defaultRetryPolicy: SyncConfig["retryPolicy"] = {
   maxTournamentRetries: 5,
   initialBackoffMs: 2_000,
   maxBackoffMs: 60_000,
-  tournamentDeadlineMs: 5 * 60_000,
-  staleInProgressMs: 30 * 60_000
+  tournamentDeadlineMs: 5 * 60_000
 };
 
 export function createConfig(overrides: { leagueSlug?: string } = {}): SyncConfig {

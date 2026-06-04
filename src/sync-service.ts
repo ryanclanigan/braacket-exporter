@@ -441,13 +441,19 @@ export class SyncService {
   }
 
   private async prepareQueueForProcessing(mode: "run"): Promise<void> {
-    const staleBefore = addMs(new Date(), -this.config.retryPolicy.staleInProgressMs);
-    const requeuedCount = this.repo.requeueStaleInProgress(staleBefore);
+    const repairedQueuedImported = this.repo.repairQueuedImportedState();
+    if (repairedQueuedImported > 0) {
+      this.log(
+        `${mode} repaired ${repairedQueuedImported} queued tournament(s) that already had imported data`
+      );
+    }
+
+    const requeuedCount = this.repo.requeueInProgress();
     if (requeuedCount > 0) {
-      this.log(`${mode} requeued ${requeuedCount} stale in-progress tournament(s)`);
+      this.log(`${mode} requeued ${requeuedCount} in-progress tournament(s)`);
       return;
     }
-    this.log(`${mode} found no stale in-progress tournaments`);
+    this.log(`${mode} found no in-progress tournaments`);
   }
 
   private describeTournament(tournament: TournamentRecord): string {

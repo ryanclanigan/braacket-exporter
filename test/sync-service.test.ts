@@ -21,14 +21,13 @@ function tempConfig() {
       retryPolicy: {
         ...baseConfig.retryPolicy,
         initialBackoffMs: 1,
-        maxBackoffMs: 2,
-        staleInProgressMs: 1
+        maxBackoffMs: 2
       }
     }
   };
 }
 
-test("run requeues stale in_progress tournaments", async () => {
+test("run requeues in_progress tournaments immediately", async () => {
   const { dir, config } = tempConfig();
   const db = openDatabase(config.dbPath);
   applySchema(db);
@@ -62,6 +61,69 @@ test("run requeues stale in_progress tournaments", async () => {
     .prepare(`SELECT queue_state FROM tournaments WHERE braacket_id = 'abc123'`)
     .get() as { queue_state: string };
   expect(state.queue_state).toBe("imported");
+  verifyDb.close(false);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("run repairs queued tournaments that already have imported data", async () => {
+  const { dir, config } = tempConfig();
+  const db = openDatabase(config.dbPath);
+  applySchema(db);
+  const repo = new SyncRepository(db, config.leagueSlug);
+  const runId = repo.createRun("seed");
+  const tournament = repo.upsertDiscoveredTournament(runId, {
+    braacketId: "abc123",
+    url: "https://braacket.com/tournament/abc123",
+    name: "One"
+  });
+  const attemptId = repo.beginAttempt(runId, tournament.id, 0);
+
+  repo.rewriteTournamentData(tournament.id, attemptId, {
+    braacketId: "abc123",
+    url: "https://braacket.com/tournament/abc123",
+    name: "One",
+    dateText: "2026-06-01",
+    tournamentDate: "2026-06-01",
+    players: [
+      {
+        braacketPlayerId: "p1",
+        braacketLeaguePlayerId: "lp1",
+        name: "Alice",
+        seed: 1,
+        placement: 1
+      }
+    ],
+    matches: []
+  });
+  db.prepare(
+    `UPDATE tournaments
+     SET queue_state = 'queued', last_imported_at = '2026-06-01T00:00:00.000Z'
+     WHERE id = ?`
+  ).run(tournament.id);
+  db.close(false);
+
+  const session = new BrowserSession(
+    config.cookieJarPath,
+    config.requestHeadersProfile,
+    config.retryPolicy,
+    async () => {
+      throw new Error("should not fetch repaired imported tournaments");
+    }
+  );
+  const service = new SyncService(config, session);
+  await service.init();
+  await service.run();
+  service.close();
+
+  const verifyDb = openDatabase(config.dbPath);
+  const state = verifyDb
+    .prepare(`SELECT queue_state FROM tournaments WHERE braacket_id = 'abc123'`)
+    .get() as { queue_state: string };
+  const matches = verifyDb
+    .prepare(`SELECT COUNT(*) AS count FROM matches WHERE tournament_id = ?`)
+    .get(tournament.id) as { count: number };
+  expect(state.queue_state).toBe("imported");
+  expect(matches.count).toBe(0);
   verifyDb.close(false);
   rmSync(dir, { recursive: true, force: true });
 });

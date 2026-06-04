@@ -9,7 +9,7 @@ function usage(): string {
     "    Requires --league or BRAACKET_LEAGUE_SLUG.",
     "",
     "  bun run cli sync [--league <slug>] run",
-    "    Process queued tournaments sequentially. Also requeues stale in-progress tournaments",
+    "    Process queued tournaments sequentially. Also requeues any in-progress tournaments",
     "    left behind by interrupted runs, so this is safe for both fresh and resumed work.",
     "",
     "  bun run cli sync [--league <slug>] event <id-or-url> [--force]",

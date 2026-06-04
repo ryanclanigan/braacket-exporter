@@ -17,7 +17,6 @@ export interface RetryPolicy {
   initialBackoffMs: number;
   maxBackoffMs: number;
   tournamentDeadlineMs: number;
-  staleInProgressMs: number;
 }
 
 export interface SyncConfig {

@@ -113,16 +113,26 @@ export class SyncRepository {
     return rows.map((row) => row.id);
   }
 
-  requeueStaleInProgress(staleBeforeIso: string): number {
+  repairQueuedImportedState(): number {
+    const result = this.db
+      .prepare(
+        `UPDATE tournaments
+         SET queue_state = 'imported'
+         WHERE queue_state = 'queued'
+           AND last_imported_at IS NOT NULL`
+      )
+      .run();
+    return result.changes;
+  }
+
+  requeueInProgress(): number {
     const result = this.db
       .prepare(
         `UPDATE tournaments
          SET queue_state = 'queued', current_attempt_id = NULL
-         WHERE queue_state = 'in_progress'
-           AND last_attempted_at IS NOT NULL
-           AND last_attempted_at <= ?`
+         WHERE queue_state = 'in_progress'`
       )
-      .run(staleBeforeIso);
+      .run();
     return result.changes;
   }
 
