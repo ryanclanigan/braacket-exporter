@@ -108,3 +108,40 @@ export interface TournamentImportState {
   queueState: TournamentQueueState;
   retryCount: number;
 }
+
+export interface ColleyRankingPlayer {
+  canonicalPlayerId: number;
+  name: string;
+  tournaments: number;
+  wins: number;
+  losses: number;
+  games: number;
+  rating: number;
+}
+
+export interface IdentityReconcilePlayer {
+  canonicalPlayerId: number;
+  canonicalName: string;
+  braacketLeaguePlayerId: string | null;
+  name: string;
+  tournaments: number;
+  matches: number;
+}
+
+export interface IdentityReconcileGroup {
+  normalizedName: string;
+  players: IdentityReconcilePlayer[];
+}
+
+export interface IdentityReconcileReport {
+  multipleLeagueIds: IdentityReconcileGroup[];
+  mixedLeagueAndNameOnly: IdentityReconcileGroup[];
+}
+
+export interface IdentityRepairResult {
+  normalizedName: string;
+  targetCanonicalPlayerId: number;
+  mergedCanonicalPlayerIds: number[];
+  aliasValuesCreated: string[];
+  tournamentPlayerRowsUpdated: number;
+}

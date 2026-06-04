@@ -95,6 +95,99 @@ Use this when:
 - you want it retried later by `sync run`
 - you want to clear normalized rows without immediately reimporting
 
+### `bun run cli rank colley --start-date <YYYY-MM-DD> --end-date <YYYY-MM-DD> --min-tournaments <n>`
+
+Computes a Colley matrix ranking from imported match results in the local SQLite database.
+
+Arguments:
+- `--start-date`
+  Inclusive lower bound on `tournament_date`
+- `--end-date`
+  Inclusive upper bound on `tournament_date`
+- `--min-tournaments`
+  Minimum number of distinct tournaments a player must have attended inside the date window to appear in the rankings
+
+Notes:
+- only tournaments with normalized `tournament_date` are included
+- only tournaments currently marked `imported` are included
+- attendance is counted from distinct imported tournaments in the date range
+- the attendance filter is applied before building the Colley system
+
+Example:
+
+```bash
+bun run cli rank colley --start-date 2026-01-01 --end-date 2026-06-30 --min-tournaments 3
+```
+
+### `bun run cli reconcile identities [--limit <n>]`
+
+Builds a read-only report of likely player identity splits in the local SQLite database.
+
+It reports two categories:
+- same normalized display name with multiple non-null Braacket league player IDs
+- same normalized display name with both league-backed rows and name-only fallback rows
+
+Those correspond to two different real-world failure modes:
+- `multiple league ids`
+  Braacket historically exposed two different league-scoped player IDs for the same visible name. This can happen if Braacket later merges, aliases, or redirects one league player identity to another, while your local DB still contains the older imported ID history.
+- `mixed league-backed and name-only`
+  One or more tournament player pages did not expose a league-scoped player ID for that entrant, so the importer had to fall back to a normalized-name identity such as `name:dial m`. If other tournaments for that same person did include a league-scoped ID, the local DB ends up with both a league-backed row and a name-only row.
+
+The report is intentionally read-only. Use it to review suspicious names first, then run one of the explicit repair commands below when you are confident the split is the same real player.
+
+Arguments:
+- `--limit`
+  Maximum number of suspicious normalized names to show in each category
+  Default: `50`
+
+Example:
+
+```bash
+bun run cli reconcile identities --limit 20
+```
+
+### `bun run cli reconcile fix-mixed-name-only --name <display-name>`
+
+Repairs the "one league-backed row plus one or more name-only fallback rows" case for a single display name.
+
+Use this when:
+- the reconcile report shows the same normalized name under `mixed league-backed and name-only`
+- there is exactly one real league-backed canonical player for that name
+- the name-only row exists only because one or more tournament player pages omitted the league badge / league player ID
+
+What it does:
+- requires exactly one league-backed canonical player for that normalized name
+- merges all same-name name-only canonical players into that league-backed player
+- rewrites affected `tournament_players.canonical_player_id` rows
+- stores a normalized-name alias so future name-only imports for that display name resolve to the same canonical player
+
+Example:
+
+```bash
+bun run cli reconcile fix-mixed-name-only --name "Dial M"
+```
+
+### `bun run cli reconcile fix-multiple-league-ids --name <display-name> --keep-league-id <id>`
+
+Repairs the "same display name with multiple Braacket league player IDs" case for a single display name.
+
+Use this when:
+- the reconcile report shows the same normalized name under `multiple league ids`
+- you have verified that the different historical league IDs actually refer to the same person
+- you know which league player ID should survive as the canonical one going forward
+
+What it does:
+- keeps the league-backed canonical player row whose Braacket league player ID you specify
+- merges the other same-name league-backed canonical players into that survivor
+- rewrites affected `tournament_players.canonical_player_id` rows
+- stores alias mappings from the merged historical league IDs to the surviving canonical player so future imports stay merged
+
+Example:
+
+```bash
+bun run cli reconcile fix-multiple-league-ids --name "Soda cup" --keep-league-id 2AB93591-2B06-45C2-8DD1-A4660093B913
+```
+
 ## Operational Notes
 
 - All HTTP work is sequential. There is no request parallelism and no multi-tournament parallelism.

@@ -105,6 +105,15 @@ export function applySchema(db: Database): void {
       FOREIGN KEY(canonical_player_id) REFERENCES players(id)
     );
 
+    CREATE TABLE IF NOT EXISTS player_identity_aliases (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      alias_type TEXT NOT NULL,
+      alias_value TEXT NOT NULL UNIQUE,
+      canonical_player_id INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(canonical_player_id) REFERENCES players(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS matches (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       tournament_id INTEGER NOT NULL,
@@ -155,5 +164,8 @@ export function applySchema(db: Database): void {
     CREATE UNIQUE INDEX IF NOT EXISTS players_braacket_league_player_id_unique
       ON players(braacket_league_player_id)
       WHERE braacket_league_player_id IS NOT NULL;
+
+    CREATE UNIQUE INDEX IF NOT EXISTS player_identity_aliases_type_value_unique
+      ON player_identity_aliases(alias_type, alias_value);
   `);
 }

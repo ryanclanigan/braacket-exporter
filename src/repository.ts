@@ -7,23 +7,89 @@ import type {
   TournamentQueueState,
   TournamentRecord
 } from "./types";
+import { canonicalizePlayerName, playerIdentityKey } from "./player-identity";
 
 function nowIso(): string {
   return new Date().toISOString();
 }
 
-function canonicalizePlayerName(name: string): string {
-  return name.trim().replace(/\s+/g, " ").toLowerCase();
-}
-
-function playerIdentityKey(name: string, braacketLeaguePlayerId: string | null): string {
-  return braacketLeaguePlayerId
-    ? `league:${braacketLeaguePlayerId}`
-    : `name:${canonicalizePlayerName(name)}`;
-}
-
 export class SyncRepository {
   constructor(private readonly db: Database, private readonly leagueSlug: string) {}
+
+  private getCanonicalPlayerIdFromAlias(aliasType: string, aliasValue: string): number | null {
+    const row = this.db
+      .prepare(
+        `SELECT canonical_player_id AS canonicalPlayerId
+         FROM player_identity_aliases
+         WHERE alias_type = ? AND alias_value = ?`
+      )
+      .get(aliasType, aliasValue) as { canonicalPlayerId: number } | undefined;
+    return row?.canonicalPlayerId ?? null;
+  }
+
+  private touchCanonicalPlayer(playerId: number, params: {
+    name: string;
+    braacketPlayerId: string | null;
+  }): void {
+    this.db
+      .prepare(
+        `UPDATE players
+         SET name = ?, braacket_player_id = COALESCE(braacket_player_id, ?), last_seen_at = ?
+         WHERE id = ?`
+      )
+      .run(params.name, params.braacketPlayerId, nowIso(), playerId);
+  }
+
+  private resolveCanonicalPlayerId(params: {
+    name: string;
+    braacketLeaguePlayerId: string | null;
+    braacketPlayerId: string | null;
+  }): number {
+    if (params.braacketLeaguePlayerId) {
+      const aliasedPlayerId = this.getCanonicalPlayerIdFromAlias(
+        "league_id",
+        params.braacketLeaguePlayerId
+      );
+      if (aliasedPlayerId !== null) {
+        this.touchCanonicalPlayer(aliasedPlayerId, params);
+        return aliasedPlayerId;
+      }
+    } else {
+      const aliasedPlayerId = this.getCanonicalPlayerIdFromAlias(
+        "normalized_name",
+        canonicalizePlayerName(params.name)
+      );
+      if (aliasedPlayerId !== null) {
+        this.touchCanonicalPlayer(aliasedPlayerId, params);
+        return aliasedPlayerId;
+      }
+    }
+
+    const identityKey = playerIdentityKey(params.name, params.braacketLeaguePlayerId);
+    this.db
+      .prepare(
+        `INSERT INTO players (
+           canonical_name, braacket_league_player_id, braacket_player_id, name, first_seen_at, last_seen_at
+         ) VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(canonical_name) DO UPDATE SET
+           name = excluded.name,
+           braacket_league_player_id = COALESCE(players.braacket_league_player_id, excluded.braacket_league_player_id),
+           braacket_player_id = COALESCE(players.braacket_player_id, excluded.braacket_player_id),
+           last_seen_at = excluded.last_seen_at`
+      )
+      .run(
+        identityKey,
+        params.braacketLeaguePlayerId,
+        params.braacketPlayerId,
+        params.name,
+        nowIso(),
+        nowIso()
+      );
+    const row = this.db
+      .prepare(`SELECT id FROM players WHERE canonical_name = ?`)
+      .get(identityKey) as { id: number };
+    return row.id;
+  }
 
   createRun(mode: string): number {
     const stmt = this.db.prepare(
@@ -302,33 +368,14 @@ export class SyncRepository {
       const tournamentPlayerIdByName = new Map<string, number>();
 
       for (const player of parsed.players) {
-        let canonicalPlayerId: number | null = null;
-        // League-scoped Braacket ids survive tournament-specific entrant ids, so canonical players
-        // prefer that identity and only fall back to normalized names when Braacket gives us less.
-        const identityKey = playerIdentityKey(player.name, player.braacketLeaguePlayerId);
-        this.db
-          .prepare(
-            `INSERT INTO players (
-               canonical_name, braacket_league_player_id, braacket_player_id, name, first_seen_at, last_seen_at
-             ) VALUES (?, ?, ?, ?, ?, ?)
-             ON CONFLICT(canonical_name) DO UPDATE SET
-               name = excluded.name,
-               braacket_league_player_id = COALESCE(players.braacket_league_player_id, excluded.braacket_league_player_id),
-               braacket_player_id = COALESCE(players.braacket_player_id, excluded.braacket_player_id),
-               last_seen_at = excluded.last_seen_at`
-          )
-          .run(
-            identityKey,
-            player.braacketLeaguePlayerId,
-            player.braacketPlayerId,
-            player.name,
-            nowIso(),
-            nowIso()
-          );
-        const row = this.db
-          .prepare(`SELECT id FROM players WHERE canonical_name = ?`)
-          .get(identityKey) as { id: number };
-        canonicalPlayerId = row.id;
+        // Repair commands can declare that an old league id or a name-only fallback now belongs
+        // to a different canonical player. The importer consults those aliases before creating
+        // any new canonical player rows so future reimports stay merged.
+        const canonicalPlayerId = this.resolveCanonicalPlayerId({
+          name: player.name,
+          braacketLeaguePlayerId: player.braacketLeaguePlayerId,
+          braacketPlayerId: player.braacketPlayerId
+        });
 
         const insertResult = this.db
           .prepare(
