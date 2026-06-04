@@ -8,19 +8,6 @@ The CLI can target any league slug:
 bun run cli sync --league comelee discover
 bun run cli sync --league comelee run
 ```
-
-For your normal CoMelee workflow, use the helper wrapper instead:
-
-```bash
-./scripts/comelee-sync.sh discover
-./scripts/comelee-sync.sh run
-```
-
-That helper pins:
-- `BRAACKET_LEAGUE_SLUG=comelee`
-- `BRAACKET_DB_PATH=data/comelee/braacket.sqlite`
-- `BRAACKET_COOKIE_JAR_PATH=data/comelee/cookies.json`
-
 ## Commands
 
 ### `bun run cli sync [--league <slug>] discover`

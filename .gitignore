@@ -1,6 +1,7 @@
 data/
 temp
 temp/
+scripts/
 braacket.sqlite
 *.sqlite
 *.sqlite-shm
