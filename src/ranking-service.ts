@@ -64,9 +64,18 @@ function solveLinearSystem(matrix: number[][], vector: number[]): number[] {
   return solution;
 }
 
+/**
+ * Computes date-windowed rankings from imported match data.
+ *
+ * The current implementation exposes a Colley matrix ranking over canonical player identities.
+ */
 export class RankingService {
   constructor(private readonly dbPath: string) {}
 
+  /**
+   * Computes Colley rankings for tournaments whose normalized date falls inside the inclusive
+   * `[startDate, endDate]` window and for players who attended at least `minimumTournaments`.
+   */
   computeColleyRankings(
     startDate: string,
     endDate: string,

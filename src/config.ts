@@ -20,6 +20,11 @@ export const defaultRetryPolicy: SyncConfig["retryPolicy"] = {
   tournamentDeadlineMs: 5 * 60_000
 };
 
+/**
+ * Builds sync configuration from CLI overrides and environment variables.
+ *
+ * A league slug is required and intentionally has no public default.
+ */
 export function createConfig(overrides: { leagueSlug?: string } = {}): SyncConfig {
   const leagueSlug = overrides.leagueSlug ?? process.env.BRAACKET_LEAGUE_SLUG;
   if (!leagueSlug) {

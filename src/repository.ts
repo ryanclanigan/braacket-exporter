@@ -91,6 +91,7 @@ export class SyncRepository {
     return row.id;
   }
 
+  /** Creates a `sync_runs` row for one CLI invocation. */
   createRun(mode: string): number {
     const stmt = this.db.prepare(
       `INSERT INTO sync_runs (mode, status, started_at) VALUES (?, 'running', ?)`
@@ -99,6 +100,7 @@ export class SyncRepository {
     return Number(result.lastInsertRowid);
   }
 
+  /** Marks a sync run complete with final status and summary text. */
   finishRun(runId: number, status: "succeeded" | "failed", summary: string): void {
     this.db
       .prepare(
@@ -107,10 +109,12 @@ export class SyncRepository {
       .run(status, nowIso(), summary, runId);
   }
 
+  /** Increments one counter column on the active sync run. */
   incrementRunCounter(runId: number, column: "discovered_count" | "imported_count" | "failed_count" | "skipped_count", amount = 1): void {
     this.db.prepare(`UPDATE sync_runs SET ${column} = ${column} + ? WHERE id = ?`).run(amount, runId);
   }
 
+  /** Inserts or refreshes a discovered tournament without importing its dependent rows yet. */
   upsertDiscoveredTournament(runId: number, tournament: DiscoveredTournament): TournamentRecord {
     const current = this.db
       .prepare(`SELECT * FROM tournaments WHERE braacket_id = ?`)
@@ -167,6 +171,7 @@ export class SyncRepository {
     return row ? this.mapTournament(row) : undefined;
   }
 
+  /** Lists pending tournament ids in the order the single-worker scheduler should process them. */
   listPendingTournamentIds(now = nowIso()): number[] {
     const rows = this.db
       .prepare(
@@ -179,6 +184,7 @@ export class SyncRepository {
     return rows.map((row) => row.id);
   }
 
+  /** Repairs queue rows that were accidentally reset to `queued` after a successful import. */
   repairQueuedImportedState(): number {
     const result = this.db
       .prepare(
@@ -191,6 +197,7 @@ export class SyncRepository {
     return result.changes;
   }
 
+  /** Reclaims interrupted `in_progress` tournaments so the next run can continue them. */
   requeueInProgress(): number {
     const result = this.db
       .prepare(
@@ -202,6 +209,7 @@ export class SyncRepository {
     return result.changes;
   }
 
+  /** Queues one tournament for import, optionally clearing retry metadata first. */
   queueTournament(tournamentId: number, force = false): void {
     const stateSql = force
       ? `queue_state = 'queued', retry_count = 0, next_retry_at = NULL, last_error_class = NULL, last_error_message = NULL`
@@ -209,6 +217,7 @@ export class SyncRepository {
     this.db.prepare(`UPDATE tournaments SET ${stateSql} WHERE id = ?`).run(tournamentId);
   }
 
+  /** Deletes one tournament's normalized rows and returns it to queued state. */
   resetTournament(tournamentId: number): void {
     const tx = this.db.transaction(() => {
       this.db.prepare(`DELETE FROM matches WHERE tournament_id = ?`).run(tournamentId);
@@ -230,6 +239,7 @@ export class SyncRepository {
     tx();
   }
 
+  /** Opens a new tournament import attempt and marks the tournament `in_progress`. */
   beginAttempt(runId: number, tournamentId: number, retryCount: number): number {
     const startedAt = nowIso();
     const result = this.db
@@ -250,6 +260,7 @@ export class SyncRepository {
     return attemptId;
   }
 
+  /** Persists one raw source page or fetch failure record. */
   storeSourcePage(params: {
     runId: number;
     tournamentId?: number;
@@ -286,6 +297,7 @@ export class SyncRepository {
       );
   }
 
+  /** Finalizes one tournament attempt and updates both attempt and queue state metadata. */
   finalizeAttempt(params: {
     tournamentId: number;
     attemptId: number;
@@ -351,6 +363,12 @@ export class SyncRepository {
       );
   }
 
+  /**
+   * Rewrites a tournament's normalized players and matches inside one transaction.
+   *
+   * On failure, the prior tournament snapshot remains intact because the delete-and-reinsert work
+   * is atomic at the SQLite transaction boundary.
+   */
   rewriteTournamentData(tournamentId: number, attemptId: number, parsed: ParsedTournament): void {
     const tx = this.db.transaction(() => {
       this.db
@@ -448,6 +466,7 @@ export class SyncRepository {
     tx();
   }
 
+  /** Returns current normalized dependent row counts for one tournament. */
   getDependentCounts(tournamentId: number): { players: number; matches: number } {
     const players = this.db
       .prepare(`SELECT COUNT(*) AS count FROM tournament_players WHERE tournament_id = ?`)

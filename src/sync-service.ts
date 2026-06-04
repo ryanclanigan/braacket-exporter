@@ -44,14 +44,17 @@ export class SyncService {
       );
   }
 
+  /** Loads persisted browser session state before any live HTTP work. */
   async init(): Promise<void> {
     await this.session.init();
   }
 
+  /** Closes database-backed resources held by the service. */
   close(): void {
     this.db.close(false);
   }
 
+  /** Crawls the league listing sequentially and enqueues newly discovered tournaments. */
   async discover(): Promise<void> {
     const runId = this.repo.createRun("discover");
     let discovered = 0;
@@ -123,6 +126,7 @@ export class SyncService {
     }
   }
 
+  /** Repairs queue state as needed and drains the pending tournament queue sequentially. */
   async run(): Promise<void> {
     const runId = this.repo.createRun("run");
     try {
@@ -135,6 +139,7 @@ export class SyncService {
     }
   }
 
+  /** Imports or reimports one tournament immediately by Braacket id or URL. */
   async syncEvent(idOrUrl: string, force: boolean): Promise<void> {
     const runId = this.repo.createRun("event");
     try {
@@ -155,6 +160,7 @@ export class SyncService {
     }
   }
 
+  /** Deletes one tournament's normalized rows and returns it to queued state. */
   async resetEvent(idOrUrl: string): Promise<void> {
     const runId = this.repo.createRun("reset-event");
     try {

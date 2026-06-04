@@ -128,6 +128,11 @@ function extractBraacketId(url: string): string | null {
   return match?.[1] ?? null;
 }
 
+/**
+ * Parses one league listing page into discovered tournament references plus a pagination hint.
+ *
+ * Discovery is intentionally conservative and only trusts links that clearly target tournaments.
+ */
 export function parseListingPage(html: string, baseUrl: string): {
   tournaments: DiscoveredTournament[];
   nextPageCountHint: number | null;
@@ -165,6 +170,7 @@ export function parseListingPage(html: string, baseUrl: string): {
   return { tournaments, nextPageCountHint };
 }
 
+/** Extracts the highest visible player-page number from a tournament player listing. */
 export function parseSearchPageCount(html: string): number {
   const counts = matchAll(/data-href='[^']*\bpage=(\d+)/gi, html)
     .map((match) => Number(match[1]))
@@ -172,6 +178,12 @@ export function parseSearchPageCount(html: string): number {
   return counts.length > 0 ? Math.max(...counts, 1) : 1;
 }
 
+/**
+ * Extracts the active and additional match stage URLs from a tournament match page.
+ *
+ * Braacket often exposes only one stage by default, so callers must fetch the extra stage pages
+ * explicitly to avoid importing finals-only data.
+ */
 export function parseMatchStageUrls(matchesHtml: string, tournamentUrl: string): {
   activeStageUrl: string | null;
   otherStageUrls: string[];
@@ -439,6 +451,7 @@ function parseTabularMatches(matchesHtml: string): ParsedMatch[] {
   return matches;
 }
 
+/** Builds the overview, players, and matches URLs for one tournament root URL. */
 export function buildTournamentPageUrls(tournamentUrl: string): {
   overviewUrl: string;
   playersUrl: string;
@@ -453,6 +466,12 @@ export function buildTournamentPageUrls(tournamentUrl: string): {
   };
 }
 
+/**
+ * Parses the set of fetched tournament pages into the normalized DTO used by the repository.
+ *
+ * The tournament name prefers the header's tournament anchor instead of the whole `<h1>` so league
+ * subinfo labels are not imported as part of the event name.
+ */
 export function parseTournamentPages(params: {
   tournamentUrl: string;
   overviewHtml: string;

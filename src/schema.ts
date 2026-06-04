@@ -5,6 +5,11 @@ function hasColumn(db: Database, tableName: string, columnName: string): boolean
   return rows.some((row) => row.name === columnName);
 }
 
+/**
+ * Creates or migrates the SQLite schema used by sync, ranking, and reconciliation flows.
+ *
+ * Migrations are additive so an existing local database can be upgraded in place.
+ */
 export function applySchema(db: Database): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS sync_runs (

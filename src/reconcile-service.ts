@@ -56,6 +56,11 @@ function groupRows(rows: IdentitySummaryRow[]): IdentityReconcileGroup[] {
     );
 }
 
+/**
+ * Reports and repairs known identity-split patterns in the local database.
+ *
+ * Reporting is read-only; repair methods are explicit and transactional.
+ */
 export class ReconcileService {
   constructor(private readonly dbPath: string) {}
 
@@ -129,6 +134,7 @@ export class ReconcileService {
       .all(canonicalPlayerId) as PlayerVariantRow[];
   }
 
+  /** Builds a read-only summary of likely duplicate player identities. */
   buildIdentityReport(limit = 50): IdentityReconcileReport {
     if (!Number.isInteger(limit) || limit < 1) {
       throw new Error("limit must be a positive integer");
@@ -204,6 +210,10 @@ export class ReconcileService {
     }
   }
 
+  /**
+   * Merges name-only fallback identities into the single league-backed player with the same
+   * normalized display name.
+   */
   fixMixedLeagueAndNameOnly(displayName: string): IdentityRepairResult {
     const normalizedName = canonicalizePlayerName(displayName);
     const db = openDatabase(this.dbPath);
@@ -259,6 +269,12 @@ export class ReconcileService {
     }
   }
 
+  /**
+   * Merges multiple same-name league-backed identities into one chosen surviving league id.
+   *
+   * This method refuses automatic merges when a source player's historical tournament names
+   * conflict with the requested normalized display name.
+   */
   fixMultipleLeagueIds(displayName: string, keepLeaguePlayerId: string): IdentityRepairResult {
     const normalizedName = canonicalizePlayerName(displayName);
     const db = openDatabase(this.dbPath);

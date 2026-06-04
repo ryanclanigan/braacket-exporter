@@ -1,3 +1,4 @@
+/** Queue lifecycle for a tournament in the local sync database. */
 export type TournamentQueueState =
   | "discovered"
   | "queued"
@@ -6,10 +7,13 @@ export type TournamentQueueState =
   | "failed_retryable"
   | "failed_terminal";
 
+/** High-level source page categories persisted in `source_pages`. */
 export type PageType = "listing" | "tournament" | "players" | "matches";
 
+/** Final status values recorded for a single tournament import attempt. */
 export type AttemptStatus = "started" | "succeeded" | "failed_retryable" | "failed_terminal";
 
+/** Retry, backoff, and deadline settings for sequential sync work. */
 export interface RetryPolicy {
   requestTimeoutMs: number;
   maxRequestRetries: number;
@@ -19,6 +23,7 @@ export interface RetryPolicy {
   tournamentDeadlineMs: number;
 }
 
+/** Runtime configuration for one sync session. */
 export interface SyncConfig {
   dbPath: string;
   cookieJarPath: string;
@@ -30,6 +35,7 @@ export interface SyncConfig {
   discoverMaxPages: number;
 }
 
+/** Browser-like request headers used to reduce scraper fingerprinting. */
 export interface BrowserHeaderProfile {
   userAgent: string;
   secChUa: string;
@@ -38,12 +44,14 @@ export interface BrowserHeaderProfile {
   acceptLanguage: string;
 }
 
+/** Tournament discovered from the league listing before full import. */
 export interface DiscoveredTournament {
   braacketId: string;
   url: string;
   name: string | null;
 }
 
+/** Entrant row parsed from a tournament players page. */
 export interface ParsedTournamentPlayer {
   braacketPlayerId: string | null;
   braacketLeaguePlayerId: string | null;
@@ -52,6 +60,7 @@ export interface ParsedTournamentPlayer {
   placement: number | null;
 }
 
+/** Match row normalized from one or more Braacket match views. */
 export interface ParsedMatch {
   matchKey: string;
   stageName: string | null;
@@ -67,6 +76,7 @@ export interface ParsedMatch {
   status: string | null;
 }
 
+/** Fully parsed tournament payload ready to be written transactionally. */
 export interface ParsedTournament {
   braacketId: string;
   url: string;
@@ -77,6 +87,7 @@ export interface ParsedTournament {
   matches: ParsedMatch[];
 }
 
+/** Outcome of one HTML fetch after retry and anti-bot classification. */
 export interface FetchOutcome {
   ok: boolean;
   url: string;
@@ -90,6 +101,7 @@ export interface FetchOutcome {
   errorMessage: string | null;
 }
 
+/** Minimal tournament row shape used by the sync orchestrator. */
 export interface TournamentRecord {
   id: number;
   braacketId: string;
@@ -102,6 +114,7 @@ export interface TournamentRecord {
   nextRetryAt: string | null;
 }
 
+/** Current queue and retry state for a tournament. */
 export interface TournamentImportState {
   tournamentId: number;
   braacketId: string;
@@ -109,6 +122,7 @@ export interface TournamentImportState {
   retryCount: number;
 }
 
+/** Colley ranking output for one canonical player. */
 export interface ColleyRankingPlayer {
   canonicalPlayerId: number;
   name: string;
@@ -119,6 +133,7 @@ export interface ColleyRankingPlayer {
   rating: number;
 }
 
+/** One suspicious canonical player row shown in the identity reconcile report. */
 export interface IdentityReconcilePlayer {
   canonicalPlayerId: number;
   canonicalName: string;
@@ -128,16 +143,19 @@ export interface IdentityReconcilePlayer {
   matches: number;
 }
 
+/** Suspicious identity cluster keyed by normalized display name. */
 export interface IdentityReconcileGroup {
   normalizedName: string;
   players: IdentityReconcilePlayer[];
 }
 
+/** Read-only summary of likely identity splits in the local database. */
 export interface IdentityReconcileReport {
   multipleLeagueIds: IdentityReconcileGroup[];
   mixedLeagueAndNameOnly: IdentityReconcileGroup[];
 }
 
+/** Result returned by an explicit identity repair command. */
 export interface IdentityRepairResult {
   normalizedName: string;
   targetCanonicalPlayerId: number;

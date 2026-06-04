@@ -42,11 +42,17 @@ function classifyAntiBot(status: number | null, html: string | null): string | n
   return null;
 }
 
+/**
+ * Minimal persistent cookie jar for sequential Braacket requests.
+ *
+ * This keeps public listing and tournament requests behaving like a single browser session.
+ */
 export class CookieJar {
   private readonly cookies = new Map<string, CookieRecord>();
 
   constructor(private readonly storagePath: string) {}
 
+  /** Loads any previously persisted cookies from disk. */
   async load(): Promise<void> {
     const file = Bun.file(this.storagePath);
     if (!(await file.exists())) {
@@ -59,12 +65,14 @@ export class CookieJar {
     }
   }
 
+  /** Persists the current in-memory cookie set to disk. */
   async save(): Promise<void> {
     mkdirSync(dirname(this.storagePath), { recursive: true });
     const payload = JSON.stringify([...this.cookies.values()], null, 2);
     await Bun.write(this.storagePath, payload);
   }
 
+  /** Returns the `Cookie` header value for one outgoing URL, if any cookies apply. */
   headerFor(url: URL): string | null {
     const matching = [...this.cookies.values()].filter((cookie) => {
       const domainMatch =
@@ -78,6 +86,7 @@ export class CookieJar {
     return matching.map((cookie) => `${cookie.name}=${cookie.value}`).join("; ");
   }
 
+  /** Extracts and stores `Set-Cookie` headers from one response. */
   storeFromResponse(url: URL, response: Response): void {
     const headerValues = response.headers.getSetCookie?.() ?? [];
     if (headerValues.length === 0) {
@@ -127,6 +136,9 @@ export class CookieJar {
   }
 }
 
+/**
+ * Sequential browser-like HTML fetcher with retry, timeout, and anti-bot classification.
+ */
 export class BrowserSession {
   readonly jar: CookieJar;
 
@@ -139,10 +151,16 @@ export class BrowserSession {
     this.jar = new CookieJar(jarPath);
   }
 
+  /** Loads the persisted cookie jar for this session. */
   async init(): Promise<void> {
     await this.jar.load();
   }
 
+  /**
+   * Fetches one HTML page with browser-like headers, cookie continuity, and retry/backoff.
+   *
+   * `referer` should be the previous page in the same navigation flow when available.
+   */
   async fetchHtml(url: string, referer?: string): Promise<FetchOutcome> {
     let lastErrorClass: string | null = null;
     let lastErrorMessage: string | null = null;
