@@ -194,6 +194,35 @@ test("fixMultipleLeagueIds merges same-name league-backed players and records le
   rmSync(dir, { recursive: true, force: true });
 });
 
+test("fixMultipleLeagueIds refuses to merge when a source player has conflicting tournament name variants", () => {
+  const dir = mkdtempSync(join(tmpdir(), "braacket-reconcile-"));
+  const dbPath = join(dir, "braacket.sqlite");
+  const db = openDatabase(dbPath);
+  applySchema(db);
+  seedMinimalImportGraph(db);
+
+  db.prepare(
+    `INSERT INTO players (id, canonical_name, braacket_league_player_id, name, first_seen_at, last_seen_at)
+     VALUES
+       (1, 'league:l1', 'l1', 'Soda cup', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z'),
+       (2, 'league:l2', 'l2', 'Soda cup', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`
+  ).run();
+  db.prepare(
+    `INSERT INTO tournament_players (id, tournament_id, attempt_id, canonical_player_id, braacket_league_player_id, name)
+     VALUES
+       (20, 1, 1, 2, 'l2', 'Cu')`
+  ).run();
+  db.close(false);
+
+  const service = new ReconcileService(dbPath);
+
+  expect(() => service.fixMultipleLeagueIds("Soda cup", "l1")).toThrow(
+    "Refusing to merge soda cup"
+  );
+
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test("repository reuses canonical player ids through reconcile aliases on later imports", () => {
   const dir = mkdtempSync(join(tmpdir(), "braacket-reconcile-"));
   const dbPath = join(dir, "braacket.sqlite");

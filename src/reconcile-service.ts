@@ -18,6 +18,12 @@ interface IdentitySummaryRow {
   matches: number;
 }
 
+interface PlayerVariantRow {
+  canonicalPlayerId: number;
+  name: string;
+  tournaments: number;
+}
+
 function groupRows(rows: IdentitySummaryRow[]): IdentityReconcileGroup[] {
   const byName = new Map<string, IdentityReconcilePlayer[]>();
   for (const row of rows) {
@@ -103,6 +109,24 @@ export class ReconcileService {
       db.prepare(`DELETE FROM players WHERE id = ?`).run(sourceCanonicalPlayerId);
     }
     return tournamentPlayerRowsUpdated;
+  }
+
+  private listTournamentNameVariants(
+    db: ReturnType<typeof openDatabase>,
+    canonicalPlayerId: number
+  ): PlayerVariantRow[] {
+    return db
+      .query(
+        `SELECT
+           canonical_player_id AS canonicalPlayerId,
+           name,
+           COUNT(DISTINCT tournament_id) AS tournaments
+         FROM tournament_players
+         WHERE canonical_player_id = ?
+         GROUP BY canonical_player_id, name
+         ORDER BY tournaments DESC, name ASC`
+      )
+      .all(canonicalPlayerId) as PlayerVariantRow[];
   }
 
   buildIdentityReport(limit = 50): IdentityReconcileReport {
@@ -272,6 +296,21 @@ export class ReconcileService {
           throw new Error(
             `Expected at least one other league-backed row for ${normalizedName}`
           );
+        }
+
+        for (const sourcePlayer of sourcePlayers) {
+          const variants = this.listTournamentNameVariants(db, sourcePlayer.canonicalPlayerId);
+          const conflictingVariants = variants.filter(
+            (variant) => canonicalizePlayerName(variant.name) !== normalizedName
+          );
+          if (conflictingVariants.length > 0) {
+            const details = conflictingVariants
+              .map((variant) => `${variant.name} (${variant.tournaments} tournaments)`)
+              .join(", ");
+            throw new Error(
+              `Refusing to merge ${normalizedName}: canonical player ${sourcePlayer.canonicalPlayerId} has conflicting tournament name variants: ${details}`
+            );
+          }
         }
 
         const aliasValuesCreated: string[] = [];
