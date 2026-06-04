@@ -460,6 +460,13 @@ export function parseTournamentPages(params: {
   matchesHtml: string;
 }): ParsedTournament {
   const title =
+    cleanText(
+      textContent(
+        params.overviewHtml.match(
+          /<h1[^>]*>[\s\S]*?<a[^>]*href=(["'])[^"']*\/tournament\/[^"']+\1[^>]*>([\s\S]*?)<\/a>[\s\S]*?<\/h1>/i
+        )?.[2]
+      )
+    ) ??
     cleanText(textContent(params.overviewHtml.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)?.[1])) ??
     cleanText(textContent(params.overviewHtml.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]));
   const dateText =

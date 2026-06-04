@@ -90,3 +90,27 @@ test("parseTournamentPages falls back to league badge names when tournament play
     placement: null
   });
 });
+
+test("parseTournamentPages prefers the tournament anchor inside the header over league subinfo text", () => {
+  const parsed = parseTournamentPages({
+    tournamentUrl: "https://braacket.com/tournament/abc123",
+    overviewHtml: `
+      <html>
+        <head><title>Colorado Melee CoMelee Weekly 1 / Dashboard</title></head>
+        <body>
+          <h1 class='text-transform-none'>
+            <span class='subinfos'>
+              <a href='/league/comelee'>Colorado Melee</a>
+            </span>
+            <a class='text-bold' href='/tournament/abc123'>CoMelee Weekly 1</a>
+          </h1>
+          <div class="date">Tuesday, 30 May 2026</div>
+        </body>
+      </html>
+    `,
+    playersHtml,
+    matchesHtml
+  });
+
+  expect(parsed.name).toBe("CoMelee Weekly 1");
+});
