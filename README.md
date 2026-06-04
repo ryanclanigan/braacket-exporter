@@ -5,8 +5,8 @@ Resumable Bun + SQLite importer for public Braacket league tournaments.
 The CLI can target any league slug:
 
 ```bash
-bun run cli sync --league comelee discover
-bun run cli sync --league comelee run
+bun run cli sync --league your-league discover
+bun run cli sync --league your-league run
 ```
 
 ## Environment
@@ -15,7 +15,7 @@ The importer reads these environment variables at startup:
 
 - `BRAACKET_LEAGUE_SLUG`
   Selects the Braacket league slug when `--league` is not provided.
-  Default: `comelee`
+  Default: none
   Effect: builds the listing URL as `https://braacket.com/league/<slug>/tournament`
 
 - `BRAACKET_DB_PATH`
@@ -31,13 +31,13 @@ The importer reads these environment variables at startup:
 Precedence:
 
 - `--league <slug>` overrides `BRAACKET_LEAGUE_SLUG`
-- `BRAACKET_LEAGUE_SLUG` overrides the built-in default `comelee`
+- one of `--league <slug>` or `BRAACKET_LEAGUE_SLUG` is required
 
 Examples:
 
 ```bash
-BRAACKET_LEAGUE_SLUG=comelee bun run cli sync discover
-BRAACKET_DB_PATH=./data/comelee.sqlite BRAACKET_COOKIE_JAR_PATH=./data/comelee-cookies.json bun run cli sync run
+BRAACKET_LEAGUE_SLUG=your-league bun run cli sync discover
+BRAACKET_DB_PATH=./data/your-league.sqlite BRAACKET_COOKIE_JAR_PATH=./data/your-league-cookies.json BRAACKET_LEAGUE_SLUG=your-league bun run cli sync run
 bun run cli sync --league another-league discover
 ```
 
@@ -81,7 +81,7 @@ Examples:
 bun run cli sync event 6A7851C8-8249-4C8F-AC30-179FD9A19CE0
 bun run cli sync event https://braacket.com/tournament/6A7851C8-8249-4C8F-AC30-179FD9A19CE0
 bun run cli sync event 6A7851C8-8249-4C8F-AC30-179FD9A19CE0 --force
-bun run cli sync --league comelee event 6A7851C8-8249-4C8F-AC30-179FD9A19CE0
+bun run cli sync --league your-league event 6A7851C8-8249-4C8F-AC30-179FD9A19CE0
 ```
 
 Use `--force` when you want to discard the tournament's existing normalized rows and rebuild it from the live source pages.

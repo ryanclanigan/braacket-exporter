@@ -1,5 +1,4 @@
 import { openDatabase } from "./db";
-import { defaultConfig } from "./config";
 import { applySchema } from "./schema";
 import { SyncRepository } from "./repository";
 import { BrowserSession } from "./fetcher";
@@ -30,7 +29,7 @@ export class SyncService {
   private readonly session: BrowserSession;
 
   constructor(
-    private readonly config: SyncConfig = defaultConfig,
+    private readonly config: SyncConfig,
     session?: BrowserSession
   ) {
     this.db = openDatabase(this.config.dbPath);

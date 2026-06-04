@@ -6,7 +6,7 @@ function usage(): string {
     "Usage:",
     "  bun run cli sync [--league <slug>] discover",
     "    Crawl one Braacket league listing sequentially and enqueue newly seen tournaments.",
-    "    Defaults to league 'comelee' unless --league or BRAACKET_LEAGUE_SLUG is provided.",
+    "    Requires --league or BRAACKET_LEAGUE_SLUG.",
     "",
     "  bun run cli sync [--league <slug>] run",
     "    Process queued tournaments sequentially. Also requeues stale in-progress tournaments",

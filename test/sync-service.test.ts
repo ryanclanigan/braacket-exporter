@@ -7,18 +7,19 @@ import { applySchema } from "../src/schema";
 import { SyncRepository } from "../src/repository";
 import { BrowserSession } from "../src/fetcher";
 import { SyncService } from "../src/sync-service";
-import { defaultConfig } from "../src/config";
+import { createConfig } from "../src/config";
 
 function tempConfig() {
   const dir = mkdtempSync(join(tmpdir(), "braacket-sync-"));
+  const baseConfig = createConfig({ leagueSlug: "test-league" });
   return {
     dir,
     config: {
-      ...defaultConfig,
+      ...baseConfig,
       dbPath: join(dir, "braacket.sqlite"),
       cookieJarPath: join(dir, "cookies.json"),
       retryPolicy: {
-        ...defaultConfig.retryPolicy,
+        ...baseConfig.retryPolicy,
         initialBackoffMs: 1,
         maxBackoffMs: 2,
         staleInProgressMs: 1

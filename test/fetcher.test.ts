@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BrowserSession } from "../src/fetcher";
-import { defaultConfig } from "../src/config";
+import { defaultRequestHeadersProfile, defaultRetryPolicy } from "../src/config";
 
 test("BrowserSession attaches browser-like headers and persists cookies", async () => {
   const tempDir = mkdtempSync(join(tmpdir(), "braacket-fetcher-"));
@@ -13,8 +13,8 @@ test("BrowserSession attaches browser-like headers and persists cookies", async 
 
   const session = new BrowserSession(
     jarPath,
-    defaultConfig.requestHeadersProfile,
-    { ...defaultConfig.retryPolicy, initialBackoffMs: 1, maxBackoffMs: 2 },
+    defaultRequestHeadersProfile,
+    { ...defaultRetryPolicy, initialBackoffMs: 1, maxBackoffMs: 2 },
     async (_input, init) => {
       requests.push(init ?? {});
       step += 1;
@@ -52,8 +52,8 @@ test("BrowserSession retries anti-bot responses", async () => {
 
   const session = new BrowserSession(
     jarPath,
-    defaultConfig.requestHeadersProfile,
-    { ...defaultConfig.retryPolicy, initialBackoffMs: 1, maxBackoffMs: 2, maxRequestRetries: 1 },
+    defaultRequestHeadersProfile,
+    { ...defaultRetryPolicy, initialBackoffMs: 1, maxBackoffMs: 2, maxRequestRetries: 1 },
     async () => {
       attempts += 1;
       if (attempts === 1) {
