@@ -1,12 +1,31 @@
-# Braacket CoMelee Sync
+# Braacket League Sync
 
-Resumable Bun + SQLite importer for public CoMelee tournaments on Braacket.
+Resumable Bun + SQLite importer for public Braacket league tournaments.
+
+The CLI can target any league slug:
+
+```bash
+bun run cli sync --league comelee discover
+bun run cli sync --league comelee run
+```
+
+For your normal CoMelee workflow, use the helper wrapper instead:
+
+```bash
+./scripts/comelee-sync.sh discover
+./scripts/comelee-sync.sh run
+```
+
+That helper pins:
+- `BRAACKET_LEAGUE_SLUG=comelee`
+- `BRAACKET_DB_PATH=data/comelee/braacket.sqlite`
+- `BRAACKET_COOKIE_JAR_PATH=data/comelee/cookies.json`
 
 ## Commands
 
-### `bun run cli sync discover`
+### `bun run cli sync [--league <slug>] discover`
 
-Sequentially crawls the league listing pages at `https://braacket.com/league/comelee/tournament` and inserts newly discovered tournaments into the local queue.
+Sequentially crawls the selected league listing pages at `https://braacket.com/league/<slug>/tournament` and inserts newly discovered tournaments into the local queue.
 
 Use this when:
 - you want to refresh the local queue with newly published tournaments
@@ -18,7 +37,7 @@ What it does:
 - inserts unseen tournaments into `tournaments` with `queued` state
 - leaves already-known imported tournaments alone
 
-### `bun run cli sync run`
+### `bun run cli sync [--league <slug>] run`
 
 Processes the queue sequentially, one tournament at a time.
 
@@ -32,7 +51,7 @@ What it does:
 
 `sync run` is now safe to use after an interruption. You do not need to switch to a different command after `Ctrl-C`.
 
-### `bun run cli sync event <id-or-url> [--force]`
+### `bun run cli sync [--league <slug>] event <id-or-url> [--force]`
 
 Imports one specific tournament by Braacket id or full tournament URL.
 
@@ -42,11 +61,12 @@ Examples:
 bun run cli sync event 6A7851C8-8249-4C8F-AC30-179FD9A19CE0
 bun run cli sync event https://braacket.com/tournament/6A7851C8-8249-4C8F-AC30-179FD9A19CE0
 bun run cli sync event 6A7851C8-8249-4C8F-AC30-179FD9A19CE0 --force
+bun run cli sync --league comelee event 6A7851C8-8249-4C8F-AC30-179FD9A19CE0
 ```
 
 Use `--force` when you want to discard the tournament's existing normalized rows and rebuild it from the live source pages.
 
-### `bun run cli sync reset-event <id-or-url>`
+### `bun run cli sync [--league <slug>] reset-event <id-or-url>`
 
 Deletes one tournament's normalized rows and resets its state back to `queued`.
 
@@ -62,3 +82,4 @@ Use this when:
 - Tournament imports are rewrite-based. On a failed attempt, partial normalized rows are not kept.
 - The `tournaments` table stores both `date_text` and normalized `tournament_date` (`YYYY-MM-DD`) when the event page exposes a parseable date.
 - Progress logging is written to stdout during discovery and tournament imports so you can see what is happening in long runs.
+- If you switch leagues, use separate `BRAACKET_DB_PATH` and `BRAACKET_COOKIE_JAR_PATH` values so different leagues do not share one SQLite file or cookie jar by accident.

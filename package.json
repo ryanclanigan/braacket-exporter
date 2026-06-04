@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "cli": "bun run src/cli.ts",
+    "comelee": "zsh scripts/comelee-sync.sh",
     "test": "bun test"
   }
 }
