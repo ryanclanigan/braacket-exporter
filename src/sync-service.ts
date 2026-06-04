@@ -365,6 +365,8 @@ export class SyncService {
     }
     htmlFragments.push(basePage.html);
 
+    // The default /match page is often only one stage (commonly Final). Additional pools or
+    // qualification stages live behind stage links on that page and must be fetched explicitly.
     const { otherStageUrls } = parseMatchStageUrls(basePage.html, tournamentUrl);
     for (const stageUrl of otherStageUrls) {
       this.log(`Fetching additional stage page for ${braacketId}: ${stageUrl}`);
@@ -410,6 +412,8 @@ export class SyncService {
     let lastFetchedUrl: string | null = null;
     let totalPages = 1;
 
+    // The first player page is the only place Braacket tells us how many pages exist, so we fetch
+    // sequentially and extend the loop boundary as soon as later pages become visible.
     for (let page = 1; page <= totalPages; page += 1) {
       const url = new URL(basePlayersUrl);
       url.searchParams.set("rows", String(rowsPerPage));

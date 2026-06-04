@@ -293,6 +293,8 @@ export class SyncRepository {
 
       for (const player of parsed.players) {
         let canonicalPlayerId: number | null = null;
+        // League-scoped Braacket ids survive tournament-specific entrant ids, so canonical players
+        // prefer that identity and only fall back to normalized names when Braacket gives us less.
         const identityKey = playerIdentityKey(player.name, player.braacketLeaguePlayerId);
         this.db
           .prepare(
@@ -340,6 +342,8 @@ export class SyncRepository {
         if (player.braacketPlayerId) {
           tournamentPlayerIdByBraacketId.set(player.braacketPlayerId, tournamentPlayerId);
         }
+        // Match pages sometimes omit entrant ids even when the player tab has them, so keep a
+        // same-tournament name map as the last fallback for linking matches to entrants.
         tournamentPlayerIdByName.set(player.name, tournamentPlayerId);
       }
 

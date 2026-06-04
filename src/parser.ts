@@ -215,6 +215,9 @@ function parsePlayers(playersHtml: string): ParsedTournamentPlayer[] {
       leaguePlayerLink?.groups?.attributes.match(/\baria-label=(["'])([\s\S]*?)\1/i)?.[2]
     );
     const leaguePlayerVisibleName = cleanText(textContent(leaguePlayerLink?.groups?.content));
+    // Some legacy Braacket rows render an empty tournament-player anchor and only expose the
+    // real entrant name on the league badge. Preserve the most tournament-specific value first,
+    // then fall back to the badge metadata.
     const name = tournamentPlayerName ?? leaguePlayerAriaLabel ?? leaguePlayerVisibleName;
     if (!name) {
       continue;
@@ -309,6 +312,8 @@ function parseEncounterStageMatches(matchesHtml: string): ParsedMatch[] {
     const encounterHtml = encounterMatch[1];
     const encounterIndex = encounterMatch.index ?? 0;
     const leadingHtml = matchesHtml.slice(0, encounterIndex);
+    // Braacket renders stage and round labels outside the encounter table itself, so the nearest
+    // preceding heading cells are the only reliable source for that context.
     const stageName = cleanText(
       textContent(
         [...leadingHtml.matchAll(/<span class='my-panel-heading-label'>\s*([\s\S]*?)\s*<\/span>/gi)]
@@ -360,6 +365,8 @@ function parseEncounterStageMatches(matchesHtml: string): ParsedMatch[] {
       );
 
     matches.push({
+      // Encounter ids repeat across separate stage pages, so the stage/round prefix keeps the key
+      // stable after we concatenate multiple match views into one parse pass.
       matchKey: encounterId
         ? `${slugifyKeyPart(stageName)}:${slugifyKeyPart(roundName)}:encounter-${encounterId}`
         : `${slugifyKeyPart(stageName)}:${slugifyKeyPart(roundName)}:match-${matches.length + 1}`,
