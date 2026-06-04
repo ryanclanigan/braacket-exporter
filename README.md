@@ -8,6 +8,39 @@ The CLI can target any league slug:
 bun run cli sync --league comelee discover
 bun run cli sync --league comelee run
 ```
+
+## Environment
+
+The importer reads these environment variables at startup:
+
+- `BRAACKET_LEAGUE_SLUG`
+  Selects the Braacket league slug when `--league` is not provided.
+  Default: `comelee`
+  Effect: builds the listing URL as `https://braacket.com/league/<slug>/tournament`
+
+- `BRAACKET_DB_PATH`
+  Sets the SQLite database file path.
+  Default: `./data/braacket.sqlite`
+  Effect: all run state, tournaments, players, matches, raw source pages, and attempts are stored in this file
+
+- `BRAACKET_COOKIE_JAR_PATH`
+  Sets the persisted cookie jar path.
+  Default: `./data/cookies.json`
+  Effect: the importer reuses cookies across requests and across runs using this file
+
+Precedence:
+
+- `--league <slug>` overrides `BRAACKET_LEAGUE_SLUG`
+- `BRAACKET_LEAGUE_SLUG` overrides the built-in default `comelee`
+
+Examples:
+
+```bash
+BRAACKET_LEAGUE_SLUG=comelee bun run cli sync discover
+BRAACKET_DB_PATH=./data/comelee.sqlite BRAACKET_COOKIE_JAR_PATH=./data/comelee-cookies.json bun run cli sync run
+bun run cli sync --league another-league discover
+```
+
 ## Commands
 
 ### `bun run cli sync [--league <slug>] discover`
