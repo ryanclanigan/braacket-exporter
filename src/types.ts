@@ -133,6 +133,23 @@ export interface ColleyRankingPlayer {
   rating: number;
 }
 
+/** Aggregate head-to-head record used by the ranking export format. */
+export interface ColleyExportRecord {
+  wins: number;
+  losses: number;
+  opponent: string;
+}
+
+/** Player payload exported for external ranking display tools. */
+export interface ColleyExportPlayer {
+  name: string;
+  braacket_rank: number;
+  colley_rank: number;
+  colley_score: number;
+  colley_strength_of_schedule: number;
+  records: ColleyExportRecord[];
+}
+
 /** One suspicious canonical player row shown in the identity reconcile report. */
 export interface IdentityReconcilePlayer {
   canonicalPlayerId: number;

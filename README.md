@@ -95,7 +95,7 @@ Use this when:
 - you want it retried later by `sync run`
 - you want to clear normalized rows without immediately reimporting
 
-### `bun run cli rank colley --start-date <YYYY-MM-DD> --end-date <YYYY-MM-DD> --min-tournaments <n>`
+### `bun run cli rank colley --start-date <YYYY-MM-DD> --end-date <YYYY-MM-DD> --min-tournaments <n> [--tournament-name-like <substring>] [--export <path>]`
 
 Computes a Colley matrix ranking from imported match results in the local SQLite database.
 
@@ -106,17 +106,38 @@ Arguments:
   Inclusive upper bound on `tournament_date`
 - `--min-tournaments`
   Minimum number of distinct tournaments a player must have attended inside the date window to appear in the rankings
+- `--tournament-name-like`
+  Optional substring filter applied to `tournaments.name`
+  Only tournaments whose names contain that substring are included
+- `--export`
+  Optional output path for a cached `players.json`-style artifact that can be consumed by external ranking display tools
 
 Notes:
 - only tournaments with normalized `tournament_date` are included
 - only tournaments currently marked `imported` are included
 - attendance is counted from distinct imported tournaments in the date range
 - the attendance filter is applied before building the Colley system
+- only matches between players who met `--min-tournaments` are included in the ranking and export
+- when `--tournament-name-like` is provided, the date window is further restricted to tournaments whose names match the substring
+- exported records are aggregated per opponent using canonical player identity, not raw match-page names
+- the export format is compatible with frontends that expect a `players.json` array containing `colley_rank`, `colley_score`, `colley_strength_of_schedule`, and per-opponent records
 
 Example:
 
 ```bash
 bun run cli rank colley --start-date 2026-01-01 --end-date 2026-06-30 --min-tournaments 3
+```
+
+Example with export:
+
+```bash
+bun run cli rank colley --start-date 2026-01-01 --end-date 2026-06-30 --min-tournaments 3 --export ./exports/h1-2026-players.json
+```
+
+Example scoped to one tournament family:
+
+```bash
+bun run cli rank colley --start-date 2026-01-01 --end-date 2026-06-30 --min-tournaments 3 --tournament-name-like "Wednesday" --export ./exports/h1-2026-wednesdays.json
 ```
 
 ### `bun run cli reconcile identities [--limit <n>]`

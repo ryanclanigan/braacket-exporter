@@ -1,5 +1,5 @@
 import { openDatabase } from "./db";
-import type { ColleyRankingPlayer } from "./types";
+import type { ColleyExportPlayer, ColleyRankingPlayer } from "./types";
 
 interface ColleyMatchRow {
   player1CanonicalId: number;
@@ -10,6 +10,31 @@ interface ColleyMatchRow {
 interface AttendanceRow {
   canonicalPlayerId: number;
   tournaments: number;
+}
+
+interface RecentNameRow {
+  canonicalPlayerId: number;
+  name: string;
+}
+
+interface ColleySnapshotPlayer {
+  canonicalPlayerId: number;
+  name: string;
+  tournaments: number;
+  wins: number;
+  losses: number;
+  games: number;
+  rating: number;
+}
+
+interface ColleySnapshot {
+  players: ColleySnapshotPlayer[];
+  matches: ColleyMatchRow[];
+}
+
+function buildTournamentNamePattern(tournamentNameLike?: string): string | null {
+  const trimmed = tournamentNameLike?.trim();
+  return trimmed ? `%${trimmed}%` : null;
 }
 
 function assertIsoDate(value: string, label: string): void {
@@ -64,6 +89,15 @@ function solveLinearSystem(matrix: number[][], vector: number[]): number[] {
   return solution;
 }
 
+function comparePlayers(left: ColleySnapshotPlayer, right: ColleySnapshotPlayer): number {
+  return (
+    right.rating - left.rating ||
+    right.wins - left.wins ||
+    left.losses - right.losses ||
+    left.name.localeCompare(right.name)
+  );
+}
+
 /**
  * Computes date-windowed rankings from imported match data.
  *
@@ -79,8 +113,112 @@ export class RankingService {
   computeColleyRankings(
     startDate: string,
     endDate: string,
-    minimumTournaments: number
+    minimumTournaments: number,
+    tournamentNameLike?: string
   ): ColleyRankingPlayer[] {
+    return this.buildColleySnapshot(
+      startDate,
+      endDate,
+      minimumTournaments,
+      tournamentNameLike
+    ).players.map((player) => ({
+        canonicalPlayerId: player.canonicalPlayerId,
+        name: player.name,
+        tournaments: player.tournaments,
+        wins: player.wins,
+        losses: player.losses,
+        games: player.games,
+        rating: player.rating
+      }));
+  }
+
+  /**
+   * Exports Colley ranking data in the `players.json` shape consumed by static ranking frontends.
+   */
+  exportColleyRankings(
+    startDate: string,
+    endDate: string,
+    minimumTournaments: number,
+    tournamentNameLike?: string
+  ): ColleyExportPlayer[] {
+    const snapshot = this.buildColleySnapshot(
+      startDate,
+      endDate,
+      minimumTournaments,
+      tournamentNameLike
+    );
+    const rankByPlayerId = new Map<number, number>();
+    snapshot.players.forEach((player, index) => {
+      rankByPlayerId.set(player.canonicalPlayerId, index + 1);
+    });
+
+    const playerById = new Map(snapshot.players.map((player) => [player.canonicalPlayerId, player]));
+    const nameByPlayerId = new Map(
+      snapshot.players.map((player) => [player.canonicalPlayerId, player.name])
+    );
+    const recordsByPlayerId = new Map<number, Map<number, { wins: number; losses: number }>>();
+
+    for (const match of snapshot.matches) {
+      const leftMap = recordsByPlayerId.get(match.player1CanonicalId) ?? new Map<number, { wins: number; losses: number }>();
+      const rightMap = recordsByPlayerId.get(match.player2CanonicalId) ?? new Map<number, { wins: number; losses: number }>();
+      const leftRecord = leftMap.get(match.player2CanonicalId) ?? { wins: 0, losses: 0 };
+      const rightRecord = rightMap.get(match.player1CanonicalId) ?? { wins: 0, losses: 0 };
+
+      if (match.winnerCanonicalId === match.player1CanonicalId) {
+        leftRecord.wins += 1;
+        rightRecord.losses += 1;
+      } else {
+        leftRecord.losses += 1;
+        rightRecord.wins += 1;
+      }
+
+      leftMap.set(match.player2CanonicalId, leftRecord);
+      rightMap.set(match.player1CanonicalId, rightRecord);
+      recordsByPlayerId.set(match.player1CanonicalId, leftMap);
+      recordsByPlayerId.set(match.player2CanonicalId, rightMap);
+    }
+
+    return snapshot.players.map((player, index) => {
+      const opponentRecords = [...(recordsByPlayerId.get(player.canonicalPlayerId)?.entries() ?? [])]
+        .map(([opponentPlayerId, record]) => ({
+          opponentPlayerId,
+          wins: record.wins,
+          losses: record.losses,
+          opponent: nameByPlayerId.get(opponentPlayerId) ?? `Player ${opponentPlayerId}`
+        }))
+        .sort(
+          (left, right) =>
+            (rankByPlayerId.get(left.opponentPlayerId) ?? Number.MAX_SAFE_INTEGER) -
+              (rankByPlayerId.get(right.opponentPlayerId) ?? Number.MAX_SAFE_INTEGER) ||
+            left.opponent.localeCompare(right.opponent)
+        );
+
+      let weightedOpponentScore = 0;
+      let totalSets = 0;
+      for (const record of opponentRecords) {
+        const gamesAgainstOpponent = record.wins + record.losses;
+        totalSets += gamesAgainstOpponent;
+        weightedOpponentScore +=
+          (playerById.get(record.opponentPlayerId)?.rating ?? 0) * gamesAgainstOpponent;
+      }
+
+      return {
+        name: player.name,
+        braacket_rank: index + 1,
+        colley_rank: index + 1,
+        colley_score: player.rating,
+        colley_strength_of_schedule: totalSets > 0 ? weightedOpponentScore / totalSets : 0,
+        records: opponentRecords.map(({ opponentPlayerId: _opponentPlayerId, ...record }) => record)
+      };
+    });
+  }
+
+  private buildColleySnapshot(
+    startDate: string,
+    endDate: string,
+    minimumTournaments: number,
+    tournamentNameLike?: string
+  ): ColleySnapshot {
     assertIsoDate(startDate, "start date");
     assertIsoDate(endDate, "end date");
     if (startDate > endDate) {
@@ -92,6 +230,7 @@ export class RankingService {
 
     const db = openDatabase(this.dbPath);
     try {
+      const tournamentNamePattern = buildTournamentNamePattern(tournamentNameLike);
       const attendanceRows = db
         .query(
           `SELECT
@@ -103,14 +242,21 @@ export class RankingService {
              AND t.tournament_date IS NOT NULL
              AND t.tournament_date >= ?
              AND t.tournament_date <= ?
+             AND (? IS NULL OR t.name LIKE ?)
              AND tp.canonical_player_id IS NOT NULL
            GROUP BY tp.canonical_player_id
            HAVING COUNT(DISTINCT tp.tournament_id) >= ?`
         )
-        .all(startDate, endDate, minimumTournaments) as AttendanceRow[];
+        .all(
+          startDate,
+          endDate,
+          tournamentNamePattern,
+          tournamentNamePattern,
+          minimumTournaments
+        ) as AttendanceRow[];
 
       if (attendanceRows.length === 0) {
-        return [];
+        return { players: [], matches: [] };
       }
 
       const eligiblePlayerIds = attendanceRows.map((row) => row.canonicalPlayerId);
@@ -134,11 +280,17 @@ export class RankingService {
              AND t.tournament_date IS NOT NULL
              AND t.tournament_date >= ?
              AND t.tournament_date <= ?
+             AND (? IS NULL OR t.name LIKE ?)
              AND tp1.canonical_player_id IS NOT NULL
              AND tp2.canonical_player_id IS NOT NULL
              AND tw.canonical_player_id IS NOT NULL`
         )
-        .all(startDate, endDate) as ColleyMatchRow[];
+        .all(
+          startDate,
+          endDate,
+          tournamentNamePattern,
+          tournamentNamePattern
+        ) as ColleyMatchRow[];
 
       const filteredRows = rows.filter(
         (row) =>
@@ -181,13 +333,40 @@ export class RankingService {
       const vector = games.map((_value, index) => 1 + (wins[index]! - losses[index]!) / 2);
       const ratings = solveLinearSystem(matrix, vector);
 
-      const players = db
-        .query(`SELECT id, name FROM players WHERE id IN (${playerIds.map(() => "?").join(",")})`)
-        .all(...playerIds) as Array<{ id: number; name: string }>;
-      const nameById = new Map(players.map((player) => [player.id, player.name]));
+      const recentNames = db
+        .query(
+          `WITH recent_names AS (
+             SELECT
+               tp.canonical_player_id AS canonicalPlayerId,
+               tp.name AS name,
+               ROW_NUMBER() OVER (
+                 PARTITION BY tp.canonical_player_id
+                 ORDER BY t.tournament_date DESC, t.id DESC, tp.id DESC
+               ) AS rn
+             FROM tournament_players tp
+             JOIN tournaments t ON t.id = tp.tournament_id
+             WHERE t.queue_state = 'imported'
+               AND t.tournament_date IS NOT NULL
+               AND t.tournament_date >= ?
+               AND t.tournament_date <= ?
+               AND (? IS NULL OR t.name LIKE ?)
+               AND tp.canonical_player_id IN (${playerIds.map(() => "?").join(",")})
+           )
+           SELECT canonicalPlayerId, name
+           FROM recent_names
+           WHERE rn = 1`
+        )
+        .all(
+          startDate,
+          endDate,
+          tournamentNamePattern,
+          tournamentNamePattern,
+          ...playerIds
+        ) as RecentNameRow[];
+      const nameById = new Map(recentNames.map((row) => [row.canonicalPlayerId, row.name]));
 
-      return playerIds
-        .map((playerId, index) => ({
+      const players = playerIds
+        .map((playerId, index): ColleySnapshotPlayer => ({
           canonicalPlayerId: playerId,
           name: nameById.get(playerId) ?? `Player ${playerId}`,
           tournaments: tournamentsByPlayerId.get(playerId) ?? 0,
@@ -196,7 +375,12 @@ export class RankingService {
           games: games[index]!,
           rating: ratings[index]!
         }))
-        .sort((left, right) => right.rating - left.rating || right.wins - left.wins || left.losses - right.losses || left.name.localeCompare(right.name));
+        .sort(comparePlayers);
+
+      return {
+        players,
+        matches: filteredRows
+      };
     } finally {
       db.close(false);
     }

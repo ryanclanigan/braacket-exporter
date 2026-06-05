@@ -22,8 +22,9 @@ function usage(): string {
     "  bun run cli sync [--league <slug>] reset-event <id-or-url>",
     "    Delete one tournament's normalized rows and return it to queued state without importing it.",
     "",
-    "  bun run cli rank colley --start-date <YYYY-MM-DD> --end-date <YYYY-MM-DD> --min-tournaments <n>",
+    "  bun run cli rank colley --start-date <YYYY-MM-DD> --end-date <YYYY-MM-DD> --min-tournaments <n> [--tournament-name-like <substring>] [--export <path>]",
     "    Compute Colley rankings from imported matches whose tournament date falls in the inclusive date range.",
+    "    Use --export to write a cached players.json-style artifact for external ranking displays.",
     "",
     "  bun run cli reconcile identities [--limit <n>]",
     "    Report likely player identity splits in the local SQLite database.",
@@ -223,14 +224,28 @@ async function main(): Promise<void> {
     }
 
     const minimumTournaments = Number(minimumTournamentsValue);
+    const exportPath = parseFlagValue(rest, "--export");
+    const tournamentNameLike = parseFlagValue(rest, "--tournament-name-like") ?? undefined;
     const rankingService = new RankingService(
       process.env.BRAACKET_DB_PATH ?? `${process.cwd()}/data/braacket.sqlite`
     );
     const rankings = rankingService.computeColleyRankings(
       startDate,
       endDate,
-      minimumTournaments
+      minimumTournaments,
+      tournamentNameLike
     );
+    if (exportPath) {
+      const exported = rankingService.exportColleyRankings(
+        startDate,
+        endDate,
+        minimumTournaments,
+        tournamentNameLike
+      );
+      await Bun.write(exportPath, `${JSON.stringify(exported, null, 2)}\n`);
+      console.log(`Exported ${exported.length} ranking row(s) to ${exportPath}`);
+      console.log("");
+    }
     printColleyRankings(rankings);
     return;
   }
