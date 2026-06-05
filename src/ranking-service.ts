@@ -5,11 +5,15 @@ interface ColleyMatchRow {
   player1CanonicalId: number;
   player2CanonicalId: number;
   winnerCanonicalId: number;
+  player1Score: number | null;
+  player2Score: number | null;
 }
 
-interface AttendanceRow {
+interface AttendanceTournamentRow {
   canonicalPlayerId: number;
-  tournaments: number;
+  tournamentId: number;
+  tournamentDate: string;
+  tournamentName: string;
 }
 
 interface RecentNameRow {
@@ -35,6 +39,20 @@ interface ColleySnapshot {
 function buildTournamentNamePattern(tournamentNameLike?: string): string | null {
   const trimmed = tournamentNameLike?.trim();
   return trimmed ? `%${trimmed}%` : null;
+}
+
+function normalizeAttendanceEventStem(tournamentName: string): string {
+  const [rawStem] = tournamentName.split(" - ", 1);
+  const stem = rawStem?.trim() ?? tournamentName.trim();
+  return stem.replace(/\s+(final|regen)$/i, "").trim().toLowerCase();
+}
+
+function buildAttendanceEventKey(tournamentDate: string, tournamentName: string): string {
+  return `${tournamentDate}::${normalizeAttendanceEventStem(tournamentName)}`;
+}
+
+function isObviousDisqualification(match: ColleyMatchRow): boolean {
+  return (match.player1Score ?? 0) < 0 || (match.player2Score ?? 0) < 0;
 }
 
 function assertIsoDate(value: string, label: string): void {
@@ -231,11 +249,13 @@ export class RankingService {
     const db = openDatabase(this.dbPath);
     try {
       const tournamentNamePattern = buildTournamentNamePattern(tournamentNameLike);
-      const attendanceRows = db
+      const attendanceTournamentRows = db
         .query(
           `SELECT
              tp.canonical_player_id AS canonicalPlayerId,
-             COUNT(DISTINCT tp.tournament_id) AS tournaments
+             tp.tournament_id AS tournamentId,
+             t.tournament_date AS tournamentDate,
+             t.name AS tournamentName
            FROM tournament_players tp
            JOIN tournaments t ON t.id = tp.tournament_id
            WHERE t.queue_state = 'imported'
@@ -243,25 +263,39 @@ export class RankingService {
              AND t.tournament_date >= ?
              AND t.tournament_date <= ?
              AND (? IS NULL OR t.name LIKE ?)
-             AND tp.canonical_player_id IS NOT NULL
-           GROUP BY tp.canonical_player_id
-           HAVING COUNT(DISTINCT tp.tournament_id) >= ?`
+             AND tp.canonical_player_id IS NOT NULL`
         )
         .all(
           startDate,
           endDate,
           tournamentNamePattern,
-          tournamentNamePattern,
-          minimumTournaments
-        ) as AttendanceRow[];
+          tournamentNamePattern
+        ) as AttendanceTournamentRow[];
 
-      if (attendanceRows.length === 0) {
+      if (attendanceTournamentRows.length === 0) {
         return { players: [], matches: [] };
       }
 
-      const eligiblePlayerIds = attendanceRows.map((row) => row.canonicalPlayerId);
+      const attendanceKeysByPlayerId = new Map<number, Set<string>>();
+      for (const row of attendanceTournamentRows) {
+        const attendanceKey = buildAttendanceEventKey(row.tournamentDate, row.tournamentName);
+        const keys = attendanceKeysByPlayerId.get(row.canonicalPlayerId) ?? new Set<string>();
+        keys.add(attendanceKey);
+        attendanceKeysByPlayerId.set(row.canonicalPlayerId, keys);
+      }
+
+      const eligiblePlayerIds = [...attendanceKeysByPlayerId.entries()]
+        .filter(([, keys]) => keys.size >= minimumTournaments)
+        .map(([canonicalPlayerId]) => canonicalPlayerId);
+      if (eligiblePlayerIds.length === 0) {
+        return { players: [], matches: [] };
+      }
+
       const tournamentsByPlayerId = new Map(
-        attendanceRows.map((row) => [row.canonicalPlayerId, row.tournaments])
+        [...attendanceKeysByPlayerId.entries()].map(([canonicalPlayerId, keys]) => [
+          canonicalPlayerId,
+          keys.size
+        ])
       );
       const eligiblePlayerSet = new Set(eligiblePlayerIds);
 
@@ -270,7 +304,9 @@ export class RankingService {
           `SELECT
              tp1.canonical_player_id AS player1CanonicalId,
              tp2.canonical_player_id AS player2CanonicalId,
-             tw.canonical_player_id AS winnerCanonicalId
+             tw.canonical_player_id AS winnerCanonicalId,
+             m.player1_score AS player1Score,
+             m.player2_score AS player2Score
            FROM matches m
            JOIN tournaments t ON t.id = m.tournament_id
            JOIN tournament_players tp1 ON tp1.id = m.player1_tournament_player_id
@@ -297,6 +333,7 @@ export class RankingService {
           eligiblePlayerSet.has(row.player1CanonicalId) &&
           eligiblePlayerSet.has(row.player2CanonicalId) &&
           row.player1CanonicalId !== row.player2CanonicalId &&
+          !isObviousDisqualification(row) &&
           (row.winnerCanonicalId === row.player1CanonicalId ||
             row.winnerCanonicalId === row.player2CanonicalId)
       );

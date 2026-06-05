@@ -115,9 +115,10 @@ Arguments:
 Notes:
 - only tournaments with normalized `tournament_date` are included
 - only tournaments currently marked `imported` are included
-- attendance is counted from distinct imported tournaments in the date range
+- attendance is counted from distinct same-day event groups in the date range, so obvious sub-event fragments like `AS3 Final` and `AS3 Regen` on the same day only count once
 - the attendance filter is applied before building the Colley system
 - only matches between players who met `--min-tournaments` are included in the ranking and export
+- obvious DQ-style matches with negative scores are excluded from the ranking and export
 - when `--tournament-name-like` is provided, the date window is further restricted to tournaments whose names match the substring
 - exported records are aggregated per opponent using canonical player identity, not raw match-page names
 - the export format is compatible with frontends that expect a `players.json` array containing `colley_rank`, `colley_score`, `colley_strength_of_schedule`, and per-opponent records
