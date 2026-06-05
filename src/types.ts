@@ -143,18 +143,11 @@ export interface ColleyExportRecord {
 /** Player payload exported for external ranking display tools. */
 export interface ColleyExportPlayer {
   name: string;
-  tournaments: number;
   braacket_rank: number;
   colley_rank: number;
   colley_score: number;
   colley_strength_of_schedule: number;
   records: ColleyExportRecord[];
-}
-
-/** Attendance-qualified player summary for local display filters and reports. */
-export interface AttendanceQualifiedPlayer {
-  name: string;
-  tournaments: number;
 }
 
 /** One suspicious canonical player row shown in the identity reconcile report. */
