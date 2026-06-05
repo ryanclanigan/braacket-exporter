@@ -366,3 +366,59 @@ test("rankings ignore obvious DQ-style matches with negative scores", () => {
 
   rmSync(dir, { recursive: true, force: true });
 });
+
+test("exportAttendanceQualifiedPlayers uses deduped attendance groups and recent names", () => {
+  const dir = mkdtempSync(join(tmpdir(), "braacket-ranking-"));
+  const dbPath = join(dir, "braacket.sqlite");
+  const db = openDatabase(dbPath);
+  applySchema(db);
+
+  db.prepare(
+    `INSERT INTO players (id, canonical_name, name, first_seen_at, last_seen_at)
+     VALUES
+       (1, 'name:alpha', 'Alpha', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z'),
+       (2, 'name:beta', 'Beta', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`
+  ).run();
+
+  db.prepare(
+    `INSERT INTO tournaments (
+       id, braacket_id, url, league_slug, name, tournament_date, queue_state, first_seen_at, last_seen_at, retry_count
+     ) VALUES
+       (1, 'as3-final', 'https://braacket.com/tournament/as3-final', 'test', 'AS3 Final - Melee Singles - Pool 4', '2026-05-09', 'imported', '2026-05-09T00:00:00.000Z', '2026-05-09T00:00:00.000Z', 0),
+       (2, 'as3-regen', 'https://braacket.com/tournament/as3-regen', 'test', 'AS3 Regen - Melee Singles - Top 8', '2026-05-09', 'imported', '2026-05-09T00:00:00.000Z', '2026-05-09T00:00:00.000Z', 0),
+       (3, 'weekly', 'https://braacket.com/tournament/weekly', 'test', 'Weekly Wednesday #1 - Melee Singles', '2026-05-16', 'imported', '2026-05-16T00:00:00.000Z', '2026-05-16T00:00:00.000Z', 0),
+       (4, 'weekly-2', 'https://braacket.com/tournament/weekly-2', 'test', 'Weekly Wednesday #2 - Melee Singles', '2026-05-23', 'imported', '2026-05-23T00:00:00.000Z', '2026-05-23T00:00:00.000Z', 0)`
+  ).run();
+
+  db.prepare(
+    `INSERT INTO sync_runs (id, mode, status, started_at)
+     VALUES (1, 'seed', 'succeeded', '2026-05-01T00:00:00.000Z')`
+  ).run();
+
+  db.prepare(
+    `INSERT INTO tournament_import_attempts (id, tournament_id, run_id, status, started_at)
+     VALUES
+       (1, 1, 1, 'succeeded', '2026-05-09T00:00:00.000Z'),
+       (2, 2, 1, 'succeeded', '2026-05-09T00:00:00.000Z'),
+       (3, 3, 1, 'succeeded', '2026-05-16T00:00:00.000Z'),
+       (4, 4, 1, 'succeeded', '2026-05-23T00:00:00.000Z')`
+  ).run();
+
+  db.prepare(
+    `INSERT INTO tournament_players (id, tournament_id, attempt_id, canonical_player_id, name)
+     VALUES
+       (11, 1, 1, 1, 'Alpha'),
+       (12, 1, 1, 2, 'Beta'),
+       (21, 2, 2, 1, 'Alpha'),
+       (31, 3, 3, 1, 'ALPHA!'),
+       (41, 4, 4, 1, 'ALPHA!')`
+  ).run();
+
+  const service = new RankingService(dbPath);
+  const eligible = service.exportAttendanceQualifiedPlayers("2026-05-01", "2026-05-31", 3);
+
+  expect(eligible).toEqual([{ name: "ALPHA!", tournaments: 3 }]);
+
+  db.close(false);
+  rmSync(dir, { recursive: true, force: true });
+});

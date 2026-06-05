@@ -1,5 +1,9 @@
 import { openDatabase } from "./db";
-import type { ColleyExportPlayer, ColleyRankingPlayer } from "./types";
+import type {
+  AttendanceQualifiedPlayer,
+  ColleyExportPlayer,
+  ColleyRankingPlayer
+} from "./types";
 
 interface ColleyMatchRow {
   player1CanonicalId: number;
@@ -222,6 +226,7 @@ export class RankingService {
 
       return {
         name: player.name,
+        tournaments: player.tournaments,
         braacket_rank: index + 1,
         colley_rank: index + 1,
         colley_score: player.rating,
@@ -229,6 +234,120 @@ export class RankingService {
         records: opponentRecords.map(({ opponentPlayerId: _opponentPlayerId, ...record }) => record)
       };
     });
+  }
+
+  /**
+   * Lists recent display names for players who met an attendance threshold inside the filtered
+   * tournament set. This is intended for local display filters that should not change ranking math.
+   */
+  exportAttendanceQualifiedPlayers(
+    startDate: string,
+    endDate: string,
+    minimumTournaments: number,
+    tournamentNameLike?: string
+  ): AttendanceQualifiedPlayer[] {
+    assertIsoDate(startDate, "start date");
+    assertIsoDate(endDate, "end date");
+    if (startDate > endDate) {
+      throw new Error("start date must be on or before end date");
+    }
+    if (!Number.isInteger(minimumTournaments) || minimumTournaments < 1) {
+      throw new Error("minimum tournaments must be a positive integer");
+    }
+
+    const db = openDatabase(this.dbPath);
+    try {
+      const tournamentNamePattern = buildTournamentNamePattern(tournamentNameLike);
+      const attendanceTournamentRows = db
+        .query(
+          `SELECT
+             tp.canonical_player_id AS canonicalPlayerId,
+             tp.tournament_id AS tournamentId,
+             t.tournament_date AS tournamentDate,
+             t.name AS tournamentName
+           FROM tournament_players tp
+           JOIN tournaments t ON t.id = tp.tournament_id
+           WHERE t.queue_state = 'imported'
+             AND t.tournament_date IS NOT NULL
+             AND t.tournament_date >= ?
+             AND t.tournament_date <= ?
+             AND (? IS NULL OR t.name LIKE ?)
+             AND tp.canonical_player_id IS NOT NULL`
+        )
+        .all(
+          startDate,
+          endDate,
+          tournamentNamePattern,
+          tournamentNamePattern
+        ) as AttendanceTournamentRow[];
+
+      if (attendanceTournamentRows.length === 0) {
+        return [];
+      }
+
+      const attendanceKeysByPlayerId = new Map<number, Set<string>>();
+      for (const row of attendanceTournamentRows) {
+        const attendanceKey = buildAttendanceEventKey(row.tournamentDate, row.tournamentName);
+        const keys = attendanceKeysByPlayerId.get(row.canonicalPlayerId) ?? new Set<string>();
+        keys.add(attendanceKey);
+        attendanceKeysByPlayerId.set(row.canonicalPlayerId, keys);
+      }
+
+      const qualifyingEntries = [...attendanceKeysByPlayerId.entries()]
+        .map(([canonicalPlayerId, keys]) => ({
+          canonicalPlayerId,
+          tournaments: keys.size
+        }))
+        .filter((entry) => entry.tournaments >= minimumTournaments);
+      if (qualifyingEntries.length === 0) {
+        return [];
+      }
+
+      const playerIds = qualifyingEntries.map((entry) => entry.canonicalPlayerId);
+      const recentNames = db
+        .query(
+          `WITH recent_names AS (
+             SELECT
+               tp.canonical_player_id AS canonicalPlayerId,
+               tp.name AS name,
+               ROW_NUMBER() OVER (
+                 PARTITION BY tp.canonical_player_id
+                 ORDER BY t.tournament_date DESC, t.id DESC, tp.id DESC
+               ) AS rn
+             FROM tournament_players tp
+             JOIN tournaments t ON t.id = tp.tournament_id
+             WHERE t.queue_state = 'imported'
+               AND t.tournament_date IS NOT NULL
+               AND t.tournament_date >= ?
+               AND t.tournament_date <= ?
+               AND (? IS NULL OR t.name LIKE ?)
+               AND tp.canonical_player_id IN (${playerIds.map(() => "?").join(",")})
+           )
+           SELECT canonicalPlayerId, name
+           FROM recent_names
+           WHERE rn = 1`
+        )
+        .all(
+          startDate,
+          endDate,
+          tournamentNamePattern,
+          tournamentNamePattern,
+          ...playerIds
+        ) as RecentNameRow[];
+      const nameById = new Map(recentNames.map((row) => [row.canonicalPlayerId, row.name]));
+
+      return qualifyingEntries
+        .map((entry) => ({
+          name: nameById.get(entry.canonicalPlayerId) ?? `Player ${entry.canonicalPlayerId}`,
+          tournaments: entry.tournaments
+        }))
+        .sort(
+          (left, right) =>
+            right.tournaments - left.tournaments || left.name.localeCompare(right.name)
+        );
+    } finally {
+      db.close(false);
+    }
   }
 
   private buildColleySnapshot(
