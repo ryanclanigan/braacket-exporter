@@ -92,6 +92,50 @@ func TestHandleRankingsPlannedSystems(t *testing.T) {
 	}
 }
 
+func TestPaginatePlayersCompactsByDefault(t *testing.T) {
+	players := []map[string]interface{}{
+		{
+			"name":    "Alice",
+			"records": []interface{}{map[string]interface{}{"opponent": "Bob", "wins": 1, "losses": 0}},
+		},
+		{
+			"name":    "Bob",
+			"records": []interface{}{map[string]interface{}{"opponent": "Alice", "wins": 0, "losses": 1}},
+		},
+	}
+
+	page := paginatePlayers(players, 1, 1, false)
+	if len(page) != 1 {
+		t.Fatalf("expected one player, got %d", len(page))
+	}
+	if page[0]["name"] != "Bob" {
+		t.Fatalf("expected Bob, got %#v", page[0]["name"])
+	}
+	if _, ok := page[0]["records"]; ok {
+		t.Fatalf("expected records to be removed in compact mode")
+	}
+	if page[0]["colley_rank"] != 2 {
+		t.Fatalf("expected rank 2, got %#v", page[0]["colley_rank"])
+	}
+}
+
+func TestPaginatePlayersPreservesRecordsWhenRequested(t *testing.T) {
+	players := []map[string]interface{}{
+		{
+			"name":    "Alice",
+			"records": []interface{}{map[string]interface{}{"opponent": "Bob", "wins": 1, "losses": 0}},
+		},
+	}
+
+	page := paginatePlayers(players, 0, 50, true)
+	if len(page) != 1 {
+		t.Fatalf("expected one player, got %d", len(page))
+	}
+	if _, ok := page[0]["records"]; !ok {
+		t.Fatalf("expected records to be preserved")
+	}
+}
+
 func TestStaticHandlerServesIndex(t *testing.T) {
 	server := &app{}
 	request := httptest.NewRequest(http.MethodGet, "/", nil)

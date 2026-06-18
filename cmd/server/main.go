@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -23,6 +24,7 @@ type app struct {
 	dbPath  string
 	addr    string
 	rootDir string
+	cache   rankingCache
 }
 
 type overviewResponse struct {
@@ -48,8 +50,23 @@ type rankingResponse struct {
 	EndDate            string      `json:"endDate"`
 	MinTournaments     int         `json:"minTournaments"`
 	TournamentNameLike string      `json:"tournamentNameLike,omitempty"`
+	Limit              int         `json:"limit,omitempty"`
+	Offset             int         `json:"offset,omitempty"`
+	ReturnedPlayers    int         `json:"returnedPlayers,omitempty"`
+	TotalPlayers       int         `json:"totalPlayers,omitempty"`
+	IncludeRecords     bool        `json:"includeRecords"`
 	GeneratedAt        string      `json:"generatedAt"`
 	Players            interface{} `json:"players"`
+}
+
+type rankingCache struct {
+	mu    sync.RWMutex
+	items map[string]cachedRankingResult
+}
+
+type cachedRankingResult struct {
+	generatedAt time.Time
+	players     []map[string]interface{}
 }
 
 func main() {
@@ -63,6 +80,9 @@ func main() {
 		dbPath:  envOrDefault("BRAACKET_DB_PATH", filepath.Join(wd, "data", "braacket.sqlite")),
 		addr:    envOrDefault("BRAACKET_SERVER_ADDR", ":8080"),
 		rootDir: wd,
+		cache: rankingCache{
+			items: map[string]cachedRankingResult{},
+		},
 	}
 
 	mux := http.NewServeMux()
@@ -202,6 +222,15 @@ func (a *app) handleRankings(w http.ResponseWriter, r *http.Request) {
 		minTournaments = 3
 	}
 	nameLike := strings.TrimSpace(values.Get("tournamentNameLike"))
+	limit := atoiSafe(values.Get("limit"))
+	if limit < 1 || limit > 100 {
+		limit = 50
+	}
+	offset := atoiSafe(values.Get("offset"))
+	if offset < 0 {
+		offset = 0
+	}
+	includeRecords := parseBoolFlag(values.Get("includeRecords"))
 
 	if system != "colley" {
 		writeJSON(w, http.StatusNotImplemented, rankingResponse{
@@ -212,17 +241,22 @@ func (a *app) handleRankings(w http.ResponseWriter, r *http.Request) {
 			EndDate:            endDate,
 			MinTournaments:     minTournaments,
 			TournamentNameLike: nameLike,
+			Limit:              limit,
+			Offset:             offset,
+			IncludeRecords:     includeRecords,
 			GeneratedAt:        time.Now().UTC().Format(time.RFC3339),
 			Players:            []interface{}{},
 		})
 		return
 	}
 
-	players, err := a.runColleyExport(startDate, endDate, minTournaments, nameLike)
+	fullPlayers, generatedAt, err := a.getColleyPlayers(startDate, endDate, minTournaments, nameLike)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	totalPlayers := len(fullPlayers)
+	page := paginatePlayers(fullPlayers, offset, limit, includeRecords)
 
 	writeJSON(w, http.StatusOK, rankingResponse{
 		System:             system,
@@ -231,19 +265,38 @@ func (a *app) handleRankings(w http.ResponseWriter, r *http.Request) {
 		EndDate:            endDate,
 		MinTournaments:     minTournaments,
 		TournamentNameLike: nameLike,
-		GeneratedAt:        time.Now().UTC().Format(time.RFC3339),
-		Players:            players,
+		Limit:              limit,
+		Offset:             offset,
+		ReturnedPlayers:    len(page),
+		TotalPlayers:       totalPlayers,
+		IncludeRecords:     includeRecords,
+		GeneratedAt:        generatedAt.Format(time.RFC3339),
+		Players:            page,
 	})
 }
 
-func (a *app) runColleyExport(startDate string, endDate string, minTournaments int, tournamentNameLike string) (interface{}, error) {
+func (a *app) getColleyPlayers(startDate string, endDate string, minTournaments int, tournamentNameLike string) ([]map[string]interface{}, time.Time, error) {
+	cacheKey := strings.Join([]string{
+		startDate,
+		endDate,
+		strconv.Itoa(minTournaments),
+		tournamentNameLike,
+	}, "::")
+
+	a.cache.mu.RLock()
+	cached, ok := a.cache.items[cacheKey]
+	a.cache.mu.RUnlock()
+	if ok {
+		return cached.players, cached.generatedAt, nil
+	}
+
 	tempFile, err := os.CreateTemp("", "braacket-colley-*.json")
 	if err != nil {
-		return nil, err
+		return nil, time.Time{}, err
 	}
 	tempPath := tempFile.Name()
 	if closeErr := tempFile.Close(); closeErr != nil {
-		return nil, closeErr
+		return nil, time.Time{}, closeErr
 	}
 	defer os.Remove(tempPath)
 
@@ -262,19 +315,27 @@ func (a *app) runColleyExport(startDate string, endDate string, minTournaments i
 	cmd.Dir = a.rootDir
 	cmd.Env = append(os.Environ(), "BRAACKET_DB_PATH="+a.dbPath)
 	if output, err := cmd.CombinedOutput(); err != nil {
-		return nil, fmt.Errorf("bun colley export failed: %w: %s", err, strings.TrimSpace(string(output)))
+		return nil, time.Time{}, fmt.Errorf("bun colley export failed: %w: %s", err, strings.TrimSpace(string(output)))
 	}
 
 	payload, err := os.ReadFile(tempPath)
 	if err != nil {
-		return nil, err
+		return nil, time.Time{}, err
 	}
 
 	var players []map[string]interface{}
 	if err := json.Unmarshal(payload, &players); err != nil {
-		return nil, err
+		return nil, time.Time{}, err
 	}
-	return players, nil
+
+	generatedAt := time.Now().UTC()
+	a.cache.mu.Lock()
+	a.cache.items[cacheKey] = cachedRankingResult{
+		generatedAt: generatedAt,
+		players:     players,
+	}
+	a.cache.mu.Unlock()
+	return players, generatedAt, nil
 }
 
 func (a *app) staticHandler() http.Handler {
@@ -354,6 +415,45 @@ func atoiSafe(value string) int {
 		return 0
 	}
 	return number
+}
+
+func parseBoolFlag(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func paginatePlayers(players []map[string]interface{}, offset int, limit int, includeRecords bool) []map[string]interface{} {
+	if offset >= len(players) {
+		return []map[string]interface{}{}
+	}
+	end := offset + limit
+	if end > len(players) {
+		end = len(players)
+	}
+
+	page := make([]map[string]interface{}, 0, end-offset)
+	for index := offset; index < end; index += 1 {
+		player := cloneMap(players[index])
+		player["braacket_rank"] = index + 1
+		player["colley_rank"] = index + 1
+		if !includeRecords {
+			delete(player, "records")
+		}
+		page = append(page, player)
+	}
+	return page
+}
+
+func cloneMap(input map[string]interface{}) map[string]interface{} {
+	cloned := make(map[string]interface{}, len(input))
+	for key, value := range input {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 func defaultDate(raw string, fallback time.Time) string {
