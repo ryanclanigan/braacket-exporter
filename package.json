@@ -6,6 +6,7 @@
   "scripts": {
     "cli": "bun run src/cli.ts",
     "server": "PATH=/usr/local/go/bin:$PATH go run ./cmd/server",
+    "discover-go": "PATH=/usr/local/go/bin:$PATH go run cmd/sync/main.go discover",
     "comelee": "zsh scripts/comelee-sync.sh",
     "test": "bun test"
   }

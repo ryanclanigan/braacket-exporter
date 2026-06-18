@@ -71,6 +71,24 @@ Current behavior:
 - `elo` and `trueskill` are explicitly marked as planned
 - static UI is served from the same Go process
 
+### `bun run discover-go -- --league <slug>`
+
+Runs the new Go discovery path and inserts listing-page tournaments into the local queue.
+
+Examples:
+
+```bash
+bun run discover-go -- --league comelee
+BRAACKET_LEAGUE_SLUG=comelee bun run discover-go
+```
+
+Current scope:
+
+- fetches league listing pages
+- stores raw listing HTML in `source_pages`
+- upserts discovered tournaments into `tournaments`
+- does not yet replace the Bun tournament import path
+
 ### `bun run cli sync [--league <slug>] discover`
 
 Sequentially crawls the selected league listing pages at `https://braacket.com/league/<slug>/tournament` and inserts newly discovered tournaments into the local queue.

@@ -1,7 +1,9 @@
 package synccore
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"time"
 
@@ -214,6 +216,32 @@ func (r *Repository) QueueTournament(tournamentID int, force bool) error {
 	return err
 }
 
+func (r *Repository) StoreSourcePage(runID int, tournamentID *int, attemptID *int, url string, pageType string, httpStatus *int, antiBotClass *string, errorMessage *string, html *string) error {
+	var contentHash any
+	if html != nil {
+		sum := sha256.Sum256([]byte(*html))
+		contentHash = hex.EncodeToString(sum[:])
+	}
+	_, err := r.db.Exec(
+		`INSERT INTO source_pages (
+      run_id, tournament_id, attempt_id, url, page_type, http_status,
+      content_hash, fetched_at, anti_bot_class, error_message, html
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		runID,
+		intPointerValue(tournamentID),
+		intPointerValue(attemptID),
+		url,
+		pageType,
+		intPointerValue(httpStatus),
+		contentHash,
+		nowISO(),
+		stringPointerValue(antiBotClass),
+		stringPointerValue(errorMessage),
+		stringPointerValue(html),
+	)
+	return err
+}
+
 func scanTournament(scanner interface{ Scan(...any) error }) (*TournamentRecord, error) {
 	var record TournamentRecord
 	err := scanner.Scan(
@@ -241,6 +269,20 @@ func nowISO() string {
 }
 
 func nullStringPointer(value *string) any {
+	if value == nil {
+		return nil
+	}
+	return *value
+}
+
+func intPointerValue(value *int) any {
+	if value == nil {
+		return nil
+	}
+	return *value
+}
+
+func stringPointerValue(value *string) any {
 	if value == nil {
 		return nil
 	}
