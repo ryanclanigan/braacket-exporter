@@ -1,6 +1,7 @@
 package main
 
 import (
+	"braacketreplacement/internal/colley"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -133,6 +134,83 @@ func TestPaginatePlayersPreservesRecordsWhenRequested(t *testing.T) {
 	}
 	if _, ok := page[0]["records"]; !ok {
 		t.Fatalf("expected records to be preserved")
+	}
+}
+
+func TestComputeColleyExport(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "ranking.sqlite")
+	setupSQLiteFixture(t, dbPath, `
+CREATE TABLE tournaments (
+  id INTEGER PRIMARY KEY,
+  league_slug TEXT,
+  name TEXT,
+  tournament_date TEXT,
+  queue_state TEXT
+);
+CREATE TABLE players (
+  id INTEGER PRIMARY KEY,
+  canonical_name TEXT,
+  name TEXT,
+  first_seen_at TEXT,
+  last_seen_at TEXT
+);
+CREATE TABLE tournament_players (
+  id INTEGER PRIMARY KEY,
+  tournament_id INTEGER,
+  canonical_player_id INTEGER,
+  name TEXT
+);
+CREATE TABLE matches (
+  id INTEGER PRIMARY KEY,
+  tournament_id INTEGER,
+  player1_tournament_player_id INTEGER,
+  player2_tournament_player_id INTEGER,
+  winner_tournament_player_id INTEGER,
+  player1_score INTEGER,
+  player2_score INTEGER
+);
+INSERT INTO tournaments (id, league_slug, name, tournament_date, queue_state)
+VALUES
+  (1, 'comelee', 'Weekly Wednesday #1', '2026-01-10', 'imported'),
+  (2, 'comelee', 'Weekly Wednesday #2', '2026-01-24', 'imported');
+INSERT INTO players (id, canonical_name, name, first_seen_at, last_seen_at)
+VALUES
+  (1, 'name:alice', 'Alice', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
+  (2, 'name:bob', 'Bob', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+INSERT INTO tournament_players (id, tournament_id, canonical_player_id, name)
+VALUES
+  (11, 1, 1, 'Alice'),
+  (12, 1, 2, 'Bob'),
+  (21, 2, 1, 'ALICE!'),
+  (22, 2, 2, 'Bob');
+INSERT INTO matches (id, tournament_id, player1_tournament_player_id, player2_tournament_player_id, winner_tournament_player_id, player1_score, player2_score)
+VALUES
+  (101, 1, 11, 12, 11, 3, 1),
+  (102, 2, 21, 22, 22, 2, 3);
+`)
+
+	exported, err := colley.ComputeExport(dbPath, "2026-01-01", "2026-01-31", 2, "Wednesday")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(exported) != 2 {
+		t.Fatalf("expected 2 exported players, got %d", len(exported))
+	}
+	firstName, _ := exported[0]["name"].(string)
+	secondName, _ := exported[1]["name"].(string)
+	if firstName != "ALICE!" && secondName != "ALICE!" {
+		t.Fatalf("expected recent player name ALICE! in export, got %#v", exported)
+	}
+	records, ok := exported[0]["records"].([]map[string]interface{})
+	if ok {
+		if len(records) == 0 {
+			t.Fatalf("expected records in export")
+		}
+		return
+	}
+	rawRecords, ok := exported[0]["records"].([]interface{})
+	if !ok || len(rawRecords) == 0 {
+		t.Fatalf("expected records in export, got %#v", exported[0]["records"])
 	}
 }
 

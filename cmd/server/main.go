@@ -1,6 +1,7 @@
 package main
 
 import (
+	"braacketreplacement/internal/colley"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -20,11 +21,9 @@ import (
 var embeddedFiles embed.FS
 
 type app struct {
-	bunPath string
-	dbPath  string
-	addr    string
-	rootDir string
-	cache   rankingCache
+	dbPath string
+	addr   string
+	cache  rankingCache
 }
 
 type overviewResponse struct {
@@ -76,10 +75,8 @@ func main() {
 	}
 
 	server := &app{
-		bunPath: envOrDefault("BUN_PATH", "bun"),
-		dbPath:  envOrDefault("BRAACKET_DB_PATH", filepath.Join(wd, "data", "braacket.sqlite")),
-		addr:    envOrDefault("BRAACKET_SERVER_ADDR", ":8080"),
-		rootDir: wd,
+		dbPath: envOrDefault("BRAACKET_DB_PATH", filepath.Join(wd, "data", "braacket.sqlite")),
+		addr:   envOrDefault("BRAACKET_SERVER_ADDR", ":8080"),
 		cache: rankingCache{
 			items: map[string]cachedRankingResult{},
 		},
@@ -290,41 +287,8 @@ func (a *app) getColleyPlayers(startDate string, endDate string, minTournaments 
 		return cached.players, cached.generatedAt, nil
 	}
 
-	tempFile, err := os.CreateTemp("", "braacket-colley-*.json")
+	players, err := colley.ComputeExport(a.dbPath, startDate, endDate, minTournaments, tournamentNameLike)
 	if err != nil {
-		return nil, time.Time{}, err
-	}
-	tempPath := tempFile.Name()
-	if closeErr := tempFile.Close(); closeErr != nil {
-		return nil, time.Time{}, closeErr
-	}
-	defer os.Remove(tempPath)
-
-	args := []string{
-		"run", "src/cli.ts", "rank", "colley",
-		"--start-date", startDate,
-		"--end-date", endDate,
-		"--min-tournaments", strconv.Itoa(minTournaments),
-		"--export", tempPath,
-	}
-	if tournamentNameLike != "" {
-		args = append(args, "--tournament-name-like", tournamentNameLike)
-	}
-
-	cmd := exec.Command(a.bunPath, args...)
-	cmd.Dir = a.rootDir
-	cmd.Env = append(os.Environ(), "BRAACKET_DB_PATH="+a.dbPath)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return nil, time.Time{}, fmt.Errorf("bun colley export failed: %w: %s", err, strings.TrimSpace(string(output)))
-	}
-
-	payload, err := os.ReadFile(tempPath)
-	if err != nil {
-		return nil, time.Time{}, err
-	}
-
-	var players []map[string]interface{}
-	if err := json.Unmarshal(payload, &players); err != nil {
 		return nil, time.Time{}, err
 	}
 
