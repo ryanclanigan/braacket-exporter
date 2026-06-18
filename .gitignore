@@ -7,3 +7,5 @@ braacket.sqlite
 *.sqlite-shm
 *.sqlite-wal
 .DS_Store
+.cache/
+/server

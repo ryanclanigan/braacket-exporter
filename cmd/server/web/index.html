@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Braacket Replacement</title>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <aside class="sidebar">
+        <div>
+          <p class="eyebrow">Ranking Ops</p>
+          <h1>Braacket Replacement</h1>
+          <p class="lede">
+            Fast admin-facing rankings, import visibility, and a UI that is built for reading league data instead of waiting on it.
+          </p>
+        </div>
+        <nav class="sidebar-nav">
+          <a href="#overview">Overview</a>
+          <a href="#rankings">Rankings</a>
+          <a href="#players">Players</a>
+          <a href="#rewrite">Rewrite</a>
+        </nav>
+      </aside>
+
+      <main class="content">
+        <section class="hero">
+          <div>
+            <p class="eyebrow">Admin Surface</p>
+            <h2>Rankings first, tournament ops intentionally excluded</h2>
+          </div>
+          <div class="hero-note">
+            <strong>Current server shape:</strong> Go HTTP server + static UI + current Bun ranking pipeline.
+          </div>
+        </section>
+
+        <section id="overview" class="panel">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">League Snapshot</p>
+              <h3>Overview</h3>
+            </div>
+            <button id="refresh-overview" class="button-secondary">Refresh</button>
+          </div>
+          <div id="overview-cards" class="stats-grid"></div>
+        </section>
+
+        <section id="rankings" class="panel">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Ranking Systems</p>
+              <h3>Rankings</h3>
+            </div>
+          </div>
+
+          <form id="ranking-form" class="filters">
+            <label>
+              System
+              <select name="system">
+                <option value="colley">Colley</option>
+                <option value="elo">Elo</option>
+                <option value="trueskill">TrueSkill</option>
+              </select>
+            </label>
+            <label>
+              Start Date
+              <input type="date" name="startDate" />
+            </label>
+            <label>
+              End Date
+              <input type="date" name="endDate" />
+            </label>
+            <label>
+              Min Tournaments
+              <input type="number" name="minTournaments" min="1" value="3" />
+            </label>
+            <label>
+              Tournament Filter
+              <input type="text" name="tournamentNameLike" placeholder="Weekly, Arcadian, Monday..." />
+            </label>
+            <button type="submit" class="button-primary">Load Rankings</button>
+          </form>
+
+          <div id="ranking-meta" class="callout"></div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Rank</th>
+                  <th>Player</th>
+                  <th>Score</th>
+                  <th>Strength</th>
+                  <th>Top Opponents</th>
+                </tr>
+              </thead>
+              <tbody id="ranking-rows"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="players" class="panel">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Player Index</p>
+              <h3>Search</h3>
+            </div>
+          </div>
+
+          <form id="player-form" class="filters compact">
+            <label>
+              Search
+              <input type="text" name="search" placeholder="Alice, Dial M, Bob..." />
+            </label>
+            <button type="submit" class="button-secondary">Find Players</button>
+          </form>
+
+          <div id="player-results" class="player-list"></div>
+        </section>
+
+        <section id="rewrite" class="panel rewrite-panel">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Rewrite Target</p>
+              <h3>Next native features</h3>
+            </div>
+          </div>
+          <ul class="rewrite-list">
+            <li>Replace Bun CLI shell-out for Colley with native in-process ranking services.</li>
+            <li>Add native Elo and TrueSkill implementations on the same canonical player graph.</li>
+            <li>Move importer orchestration into the server runtime with concurrent fetch workers.</li>
+            <li>Add admin pages for sync health, source page inspection, and identity repairs.</li>
+          </ul>
+        </section>
+      </main>
+    </div>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+  </html>

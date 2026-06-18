@@ -2,6 +2,8 @@
 
 Resumable Bun + SQLite importer for public Braacket league tournaments.
 
+This repository now also contains an initial Go-based web app shell for the admin/rankings side of the replacement. The current web layer wraps the existing Bun ranking implementation for Colley while the native rewrite is underway.
+
 The CLI can target any league slug:
 
 ```bash
@@ -42,6 +44,32 @@ bun run cli sync --league another-league discover
 ```
 
 ## Commands
+
+### `bun run server`
+
+Starts the new replacement UI and JSON API on `:8080` by default.
+
+Environment:
+
+- `BRAACKET_SERVER_ADDR`
+  HTTP bind address
+  Default: `:8080`
+- `BUN_PATH`
+  Bun executable path used by the Go server when it shells out to the existing Colley ranking command
+  Default: `bun`
+
+Current API surface:
+
+- `GET /api/health`
+- `GET /api/overview`
+- `GET /api/players?search=<name>&limit=<n>`
+- `GET /api/rankings?system=colley|elo|trueskill&startDate=<YYYY-MM-DD>&endDate=<YYYY-MM-DD>&minTournaments=<n>&tournamentNameLike=<substring>`
+
+Current behavior:
+
+- `colley` is live and uses the existing Bun ranking pipeline
+- `elo` and `trueskill` are explicitly marked as planned
+- static UI is served from the same Go process
 
 ### `bun run cli sync [--league <slug>] discover`
 
