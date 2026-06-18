@@ -5,6 +5,14 @@ const playerResults = document.querySelector("#player-results");
 const rankingForm = document.querySelector("#ranking-form");
 const playerForm = document.querySelector("#player-form");
 const refreshOverviewButton = document.querySelector("#refresh-overview");
+const previousPageButton = document.querySelector("#previous-page");
+const nextPageButton = document.querySelector("#next-page");
+const rankingPageMeta = document.querySelector("#ranking-page-meta");
+
+const rankingState = {
+  limit: 50,
+  offset: 0,
+};
 
 function defaultDate(offsetDays) {
   const value = new Date();
@@ -43,19 +51,27 @@ function renderRankingResponse(data) {
   if (data.status !== "ready") {
     rankingMeta.innerHTML = `<div class="warning">${data.message || "Ranking system not available."}</div>`;
     rankingRows.innerHTML = "";
+    rankingPageMeta.textContent = "";
     return;
   }
 
   const players = Array.isArray(data.players) ? data.players : [];
   rankingMeta.innerHTML = `
-    <strong>${players.length}</strong> ranked players from
+    <strong>${data.totalPlayers ?? players.length}</strong> ranked players from
     <strong>${data.startDate}</strong> to <strong>${data.endDate}</strong>
     with minimum attendance <strong>${data.minTournaments}</strong>.
   `;
+  const startRank = (data.offset ?? 0) + 1;
+  const endRank = (data.offset ?? 0) + players.length;
+  rankingPageMeta.textContent =
+    players.length > 0
+      ? `Showing ${startRank}-${endRank} of ${data.totalPlayers}`
+      : "No players on this page";
+  previousPageButton.disabled = (data.offset ?? 0) <= 0;
+  nextPageButton.disabled = (data.offset ?? 0) + players.length >= (data.totalPlayers ?? players.length);
 
   rankingRows.innerHTML = players
-    .slice(0, 100)
-    .map((player, index) => {
+    .map((player) => {
       const score = typeof player.colley_score === "number" ? player.colley_score.toFixed(6) : "n/a";
       const strength =
         typeof player.colley_strength_of_schedule === "number"
@@ -63,6 +79,7 @@ function renderRankingResponse(data) {
           : "n/a";
       const opponents = Array.isArray(player.records)
         ? player.records
+            .filter((record) => Number(record.wins) > 0)
             .slice(0, 3)
             .map((record) => `${record.opponent} (${record.wins}-${record.losses})`)
             .join(", ")
@@ -70,11 +87,11 @@ function renderRankingResponse(data) {
 
       return `
         <tr>
-          <td>${index + 1}</td>
+          <td>${player.colley_rank ?? player.braacket_rank ?? "n/a"}</td>
           <td>${player.name}</td>
           <td>${score}</td>
           <td>${strength}</td>
-          <td class="muted">${opponents || "No head-to-head summary"}</td>
+          <td class="muted">${opponents || "No wins on ranked opponents shown"}</td>
         </tr>
       `;
     })
@@ -107,8 +124,12 @@ async function loadOverview() {
 
 async function loadRankings() {
   rankingMeta.textContent = "Loading rankings...";
+  rankingPageMeta.textContent = "";
   rankingRows.innerHTML = "";
   const params = new URLSearchParams(new FormData(rankingForm));
+  params.set("limit", String(rankingState.limit));
+  params.set("offset", String(rankingState.offset));
+  params.set("includeRecords", "true");
   const response = await fetch(`/api/rankings?${params.toString()}`);
   const data = await response.json();
   renderRankingResponse(data);
@@ -124,6 +145,7 @@ async function loadPlayers() {
 
 rankingForm.addEventListener("submit", (event) => {
   event.preventDefault();
+  rankingState.offset = 0;
   void loadRankings();
 });
 
@@ -134,6 +156,16 @@ playerForm.addEventListener("submit", (event) => {
 
 refreshOverviewButton.addEventListener("click", () => {
   void loadOverview();
+});
+
+previousPageButton.addEventListener("click", () => {
+  rankingState.offset = Math.max(0, rankingState.offset - rankingState.limit);
+  void loadRankings();
+});
+
+nextPageButton.addEventListener("click", () => {
+  rankingState.offset += rankingState.limit;
+  void loadRankings();
 });
 
 setDefaultFilters();

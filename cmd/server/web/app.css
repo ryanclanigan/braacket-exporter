@@ -201,6 +201,14 @@ button {
   overflow-x: auto;
 }
 
+.pager {
+  margin-top: 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
