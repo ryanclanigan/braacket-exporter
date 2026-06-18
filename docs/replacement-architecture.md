@@ -30,18 +30,35 @@ The first pass in this repo uses a Go HTTP server because:
 The current repository already has working pieces we should preserve short term:
 
 - Braacket ingestion and identity repair in Bun
-- Colley ranking computation in Bun
+- Elo and TrueSkill are not implemented yet
 - SQLite as the durable local store
 
-The new Go server currently wraps those pieces rather than pretending they were already rewritten.
+The new Go server now owns the live read/query path and native Colley ranking, while discovery/import
+and identity repair still live in Bun during the transition.
 
 That means:
 
-- `GET /api/rankings?system=colley` is live and backed by the existing ranking pipeline
+- `GET /api/rankings?system=colley` is live and computed natively in Go
 - `GET /api/rankings?system=elo|trueskill` is intentionally marked as planned
-- overview and player search come directly from the local SQLite dataset
+- overview and player search run through in-process SQLite queries from Go
+- discovery/import/reconcile are still Bun-driven
 
 This is a deliberate bridge, not the target end state.
+
+## Migration Order
+
+The intended migration order for this repository is:
+
+1. move read/query paths into Go so the web app is not built on shell-outs
+2. move ranking engines into Go, starting with Colley and then adding Elo and TrueSkill
+3. move discovery/import orchestration into Go with bounded worker pools and per-tournament isolation
+4. move identity repair and other admin actions into Go-backed API handlers and UI flows
+
+This order is deliberate:
+
+- it stabilizes the server runtime first
+- it removes runtime process hops before importer rewrites
+- it keeps the existing Bun importer usable until the product-facing ranking surface is solid
 
 ## Native Rewrite Targets
 
