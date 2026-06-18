@@ -72,10 +72,10 @@ function renderRankingResponse(data) {
 
   rankingRows.innerHTML = players
     .map((player) => {
-      const score = typeof player.colley_score === "number" ? player.colley_score.toFixed(6) : "n/a";
+      const score = typeof player.score === "number" ? player.score.toFixed(6) : "n/a";
       const strength =
-        typeof player.colley_strength_of_schedule === "number"
-          ? player.colley_strength_of_schedule.toFixed(6)
+        typeof player.strength_of_schedule === "number"
+          ? player.strength_of_schedule.toFixed(6)
           : "n/a";
       const opponents = Array.isArray(player.records)
         ? player.records
@@ -87,7 +87,7 @@ function renderRankingResponse(data) {
 
       return `
         <tr>
-          <td>${player.colley_rank ?? player.braacket_rank ?? "n/a"}</td>
+          <td>${player.rank ?? player.colley_rank ?? player.elo_rank ?? player.braacket_rank ?? "n/a"}</td>
           <td>${player.name}</td>
           <td>${score}</td>
           <td>${strength}</td>

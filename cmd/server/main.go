@@ -2,9 +2,11 @@ package main
 
 import (
 	"braacketreplacement/internal/colley"
+	"braacketreplacement/internal/elo"
 	"database/sql"
 	"embed"
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
@@ -234,6 +236,31 @@ func (a *app) handleRankings(w http.ResponseWriter, r *http.Request) {
 	includeRecords := parseBoolFlag(values.Get("includeRecords"))
 
 	if system != "colley" {
+		if system == "elo" {
+			fullPlayers, generatedAt, err := a.getRankingPlayers(system, startDate, endDate, minTournaments, nameLike)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err)
+				return
+			}
+			totalPlayers := len(fullPlayers)
+			page := paginatePlayers(fullPlayers, offset, limit, includeRecords)
+			writeJSON(w, http.StatusOK, rankingResponse{
+				System:             system,
+				Status:             "ready",
+				StartDate:          startDate,
+				EndDate:            endDate,
+				MinTournaments:     minTournaments,
+				TournamentNameLike: nameLike,
+				Limit:              limit,
+				Offset:             offset,
+				ReturnedPlayers:    len(page),
+				TotalPlayers:       totalPlayers,
+				IncludeRecords:     includeRecords,
+				GeneratedAt:        generatedAt.Format(time.RFC3339),
+				Players:            page,
+			})
+			return
+		}
 		writeJSON(w, http.StatusNotImplemented, rankingResponse{
 			System:             system,
 			Status:             "planned",
@@ -251,7 +278,7 @@ func (a *app) handleRankings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fullPlayers, generatedAt, err := a.getColleyPlayers(startDate, endDate, minTournaments, nameLike)
+	fullPlayers, generatedAt, err := a.getRankingPlayers(system, startDate, endDate, minTournaments, nameLike)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -276,8 +303,9 @@ func (a *app) handleRankings(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (a *app) getColleyPlayers(startDate string, endDate string, minTournaments int, tournamentNameLike string) ([]map[string]interface{}, time.Time, error) {
+func (a *app) getRankingPlayers(system string, startDate string, endDate string, minTournaments int, tournamentNameLike string) ([]map[string]interface{}, time.Time, error) {
 	cacheKey := strings.Join([]string{
+		system,
 		startDate,
 		endDate,
 		strconv.Itoa(minTournaments),
@@ -291,7 +319,18 @@ func (a *app) getColleyPlayers(startDate string, endDate string, minTournaments 
 		return cached.players, cached.generatedAt, nil
 	}
 
-	players, err := colley.ComputeExport(a.dbPath, startDate, endDate, minTournaments, tournamentNameLike)
+	var (
+		players []map[string]interface{}
+		err     error
+	)
+	switch system {
+	case "colley":
+		players, err = colley.ComputeExport(a.dbPath, startDate, endDate, minTournaments, tournamentNameLike)
+	case "elo":
+		players, err = elo.ComputeExport(a.dbPath, startDate, endDate, minTournaments, tournamentNameLike)
+	default:
+		return nil, time.Time{}, fmt.Errorf("unsupported ranking system: %s", system)
+	}
 	if err != nil {
 		return nil, time.Time{}, err
 	}
@@ -397,8 +436,8 @@ func paginatePlayers(players []map[string]interface{}, offset int, limit int, in
 	page := make([]map[string]interface{}, 0, end-offset)
 	for index := offset; index < end; index += 1 {
 		player := cloneMap(players[index])
+		player["rank"] = index + 1
 		player["braacket_rank"] = index + 1
-		player["colley_rank"] = index + 1
 		if !includeRecords {
 			delete(player, "records")
 		}
