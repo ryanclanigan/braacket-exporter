@@ -2,19 +2,20 @@ package main
 
 import (
 	"braacketreplacement/internal/colley"
+	"database/sql"
 	"embed"
 	"encoding/json"
-	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	_ "github.com/mattn/go-sqlite3"
 )
 
 //go:embed all:web
@@ -105,9 +106,18 @@ func (a *app) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *app) handleOverview(w http.ResponseWriter, r *http.Request) {
-	query := `SELECT
+	db, err := openAppDB(a.dbPath)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	defer db.Close()
+
+	var response overviewResponse
+	err = db.QueryRow(`
+SELECT
   COALESCE(MAX(league_slug), '') AS league_slug,
-  SUM(CASE WHEN queue_state = 'imported' THEN 1 ELSE 0 END) AS imported_tournaments,
+  COALESCE(SUM(CASE WHEN queue_state = 'imported' THEN 1 ELSE 0 END), 0) AS imported_tournaments,
   (SELECT COUNT(*) FROM players) AS players,
   (SELECT COUNT(*) FROM matches) AS matches,
   COALESCE(
@@ -126,27 +136,17 @@ func (a *app) handleOverview(w http.ResponseWriter, r *http.Request) {
      LIMIT 1),
     ''
   ) AS latest_date
-FROM tournaments;`
-
-	stdout, err := runSQLite(a.dbPath, query)
+FROM tournaments`).Scan(
+		&response.LeagueSlug,
+		&response.ImportedTournaments,
+		&response.Players,
+		&response.Matches,
+		&response.LatestTournament,
+		&response.LatestDate,
+	)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
-	}
-
-	fields := splitPipeRow(stdout)
-	if len(fields) < 6 {
-		writeError(w, http.StatusInternalServerError, fmt.Errorf("unexpected sqlite output: %q", stdout))
-		return
-	}
-
-	response := overviewResponse{
-		LeagueSlug:          fields[0],
-		ImportedTournaments: atoiSafe(fields[1]),
-		Players:             atoiSafe(fields[2]),
-		Matches:             atoiSafe(fields[3]),
-		LatestTournament:    fields[4],
-		LatestDate:          fields[5],
 	}
 	writeJSON(w, http.StatusOK, response)
 }
@@ -160,10 +160,17 @@ func (a *app) handlePlayers(w http.ResponseWriter, r *http.Request) {
 	search := strings.TrimSpace(r.URL.Query().Get("search"))
 	searchPattern := "%"
 	if search != "" {
-		searchPattern = "%" + strings.ReplaceAll(search, "'", "''") + "%"
+		searchPattern = "%" + search + "%"
 	}
 
-	query := fmt.Sprintf(`SELECT
+	db, err := openAppDB(a.dbPath)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	defer db.Close()
+
+	rows, err := db.Query(`SELECT
   p.name,
   COUNT(DISTINCT tp.tournament_id) AS tournaments,
   COUNT(m.id) AS matches
@@ -172,31 +179,28 @@ LEFT JOIN tournament_players tp ON tp.canonical_player_id = p.id
 LEFT JOIN matches m
   ON m.player1_tournament_player_id = tp.id
   OR m.player2_tournament_player_id = tp.id
-WHERE p.name LIKE '%s'
+WHERE p.name LIKE ?
 GROUP BY p.id, p.name
 ORDER BY tournaments DESC, matches DESC, p.name ASC
-LIMIT %d;`, searchPattern, limit)
-
-	stdout, err := runSQLite(a.dbPath, query)
+LIMIT ?`, searchPattern, limit)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	defer rows.Close()
 
 	results := []playerSearchResult{}
-	for _, line := range strings.Split(strings.TrimSpace(stdout), "\n") {
-		if strings.TrimSpace(line) == "" {
-			continue
+	for rows.Next() {
+		var result playerSearchResult
+		if err := rows.Scan(&result.Name, &result.Tournaments, &result.Matches); err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
 		}
-		fields := splitPipeRow(line)
-		if len(fields) < 3 {
-			continue
-		}
-		results = append(results, playerSearchResult{
-			Name:        fields[0],
-			Tournaments: atoiSafe(fields[1]),
-			Matches:     atoiSafe(fields[2]),
-		})
+		results = append(results, result)
+	}
+	if err := rows.Err(); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -342,15 +346,6 @@ func requestLogMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func runSQLite(dbPath string, query string) (string, error) {
-	cmd := exec.Command("sqlite3", "-separator", "|", dbPath, query)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("sqlite3 failed: %w: %s", err, strings.TrimSpace(string(output)))
-	}
-	return string(output), nil
-}
-
 func writeJSON(w http.ResponseWriter, status int, value interface{}) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
@@ -365,12 +360,12 @@ func writeError(w http.ResponseWriter, status int, err error) {
 	})
 }
 
-func splitPipeRow(row string) []string {
-	trimmed := strings.TrimSpace(row)
-	if trimmed == "" {
-		return nil
+func openAppDB(dbPath string) (*sql.DB, error) {
+	db, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		return nil, err
 	}
-	return strings.Split(trimmed, "|")
+	return db, nil
 }
 
 func atoiSafe(value string) int {
