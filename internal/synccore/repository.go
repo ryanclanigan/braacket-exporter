@@ -4,7 +4,10 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -98,7 +101,7 @@ func (r *Repository) GetTournamentByBraacketID(braacketID string) (*TournamentRe
 
 func (r *Repository) UpsertDiscoveredTournament(runID int, tournament DiscoveredTournament) (*TournamentRecord, error) {
 	current, err := r.GetTournamentByBraacketID(tournament.BraacketID)
-	if err != nil && err != sql.ErrNoRows {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
 
@@ -216,6 +219,69 @@ func (r *Repository) QueueTournament(tournamentID int, force bool) error {
 	return err
 }
 
+func (r *Repository) ResetTournament(tournamentID int) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`DELETE FROM matches WHERE tournament_id = ?`, tournamentID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM tournament_players WHERE tournament_id = ?`, tournamentID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(
+		`UPDATE tournaments
+     SET queue_state = 'queued',
+         retry_count = 0,
+         next_retry_at = NULL,
+         current_attempt_id = NULL,
+         last_imported_at = NULL,
+         last_error_class = NULL,
+         last_error_message = NULL
+     WHERE id = ?`,
+		tournamentID,
+	); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (r *Repository) BeginAttempt(runID int, tournamentID int, retryCount int) (int, error) {
+	startedAt := nowISO()
+	result, err := r.db.Exec(
+		`INSERT INTO tournament_import_attempts (
+      tournament_id, run_id, status, started_at, retry_count
+    ) VALUES (?, ?, 'started', ?, ?)`,
+		tournamentID,
+		runID,
+		startedAt,
+		retryCount,
+	)
+	if err != nil {
+		return 0, err
+	}
+	attemptID64, err := result.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	attemptID := int(attemptID64)
+	_, err = r.db.Exec(
+		`UPDATE tournaments
+     SET queue_state = 'in_progress', last_attempted_at = ?, current_attempt_id = ?
+     WHERE id = ?`,
+		startedAt,
+		attemptID,
+		tournamentID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return attemptID, nil
+}
+
 func (r *Repository) StoreSourcePage(runID int, tournamentID *int, attemptID *int, url string, pageType string, httpStatus *int, antiBotClass *string, errorMessage *string, html *string) error {
 	var contentHash any
 	if html != nil {
@@ -240,6 +306,310 @@ func (r *Repository) StoreSourcePage(runID int, tournamentID *int, attemptID *in
 		stringPointerValue(html),
 	)
 	return err
+}
+
+func (r *Repository) FinalizeAttempt(params FinalizeAttemptParams) error {
+	var startedAt string
+	if err := r.db.QueryRow(`SELECT started_at FROM tournament_import_attempts WHERE id = ?`, params.AttemptID).Scan(&startedAt); err != nil {
+		return err
+	}
+	startedTime, err := time.Parse(time.RFC3339Nano, startedAt)
+	if err != nil {
+		startedTime, _ = time.Parse(time.RFC3339, startedAt)
+	}
+	durationMS := time.Since(startedTime).Milliseconds()
+	nextState := "failed_terminal"
+	if params.Status == "succeeded" {
+		nextState = "imported"
+	} else if params.Retryable {
+		nextState = "failed_retryable"
+	}
+	statusesJSON, err := json.Marshal(intPointersToSlice(params.HTTPStatuses))
+	if err != nil {
+		return err
+	}
+	if _, err := r.db.Exec(
+		`UPDATE tournament_import_attempts
+     SET status = ?, finished_at = ?, error_class = ?, error_message = ?,
+         request_count = ?, pages_fetched = ?, http_statuses = ?,
+         duration_ms = ?, retryable = ?
+     WHERE id = ?`,
+		params.Status,
+		nowISO(),
+		stringPointerValue(params.ErrorClass),
+		stringPointerValue(params.ErrorMessage),
+		params.RequestCount,
+		params.PagesFetched,
+		string(statusesJSON),
+		durationMS,
+		boolToInt(params.Retryable),
+		params.AttemptID,
+	); err != nil {
+		return err
+	}
+	retryIncrement := 1
+	if params.Status == "succeeded" {
+		retryIncrement = 0
+	}
+	var importedAt any
+	if nextState == "imported" {
+		importedAt = nowISO()
+	}
+	_, err = r.db.Exec(
+		`UPDATE tournaments
+     SET queue_state = ?, retry_count = retry_count + ?, current_attempt_id = NULL,
+         next_retry_at = ?, last_error_class = ?, last_error_message = ?,
+         last_imported_at = CASE WHEN ? = 'imported' THEN ? ELSE last_imported_at END
+     WHERE id = ?`,
+		nextState,
+		retryIncrement,
+		stringPointerValue(params.NextRetryAt),
+		stringPointerValue(params.ErrorClass),
+		stringPointerValue(params.ErrorMessage),
+		nextState,
+		importedAt,
+		params.TournamentID,
+	)
+	return err
+}
+
+func (r *Repository) RewriteTournamentData(tournamentID int, attemptID int, parsed ParsedTournament) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(
+		`UPDATE tournaments
+     SET name = COALESCE(?, name), date_text = ?, tournament_date = ?
+     WHERE id = ?`,
+		nullStringPointer(parsed.Name),
+		nullStringPointer(parsed.DateText),
+		nullStringPointer(parsed.TournamentDate),
+		tournamentID,
+	); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM matches WHERE tournament_id = ?`, tournamentID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM tournament_players WHERE tournament_id = ?`, tournamentID); err != nil {
+		return err
+	}
+
+	playerIDByBraacketID := map[string]int{}
+	playerIDByName := map[string]int{}
+	for _, player := range parsed.Players {
+		canonicalPlayerID, err := r.resolveCanonicalPlayerIDTx(tx, player)
+		if err != nil {
+			return err
+		}
+		rawJSON, err := json.Marshal(player)
+		if err != nil {
+			return err
+		}
+		result, err := tx.Exec(
+			`INSERT INTO tournament_players (
+        tournament_id, attempt_id, canonical_player_id, braacket_player_id, braacket_league_player_id,
+        name, seed, placement, raw_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			tournamentID,
+			attemptID,
+			canonicalPlayerID,
+			stringPointerValue(player.BraacketPlayerID),
+			stringPointerValue(player.BraacketLeaguePlayerID),
+			player.Name,
+			intPointerValue(player.Seed),
+			intPointerValue(player.Placement),
+			string(rawJSON),
+		)
+		if err != nil {
+			return err
+		}
+		tournamentPlayerID64, err := result.LastInsertId()
+		if err != nil {
+			return err
+		}
+		tournamentPlayerID := int(tournamentPlayerID64)
+		if player.BraacketPlayerID != nil {
+			playerIDByBraacketID[*player.BraacketPlayerID] = tournamentPlayerID
+		}
+		playerIDByName[player.Name] = tournamentPlayerID
+	}
+
+	for _, match := range parsed.Matches {
+		rawJSON, err := json.Marshal(match)
+		if err != nil {
+			return err
+		}
+		player1ID := resolveTournamentPlayerID(playerIDByBraacketID, playerIDByName, match.Player1BraacketPlayerID, match.Player1Name)
+		player2ID := resolveTournamentPlayerID(playerIDByBraacketID, playerIDByName, match.Player2BraacketPlayerID, match.Player2Name)
+		winnerID := resolveTournamentPlayerID(playerIDByBraacketID, playerIDByName, match.WinnerBraacketPlayerID, match.WinnerName)
+		if _, err := tx.Exec(
+			`INSERT INTO matches (
+        tournament_id, attempt_id, match_key, player1_tournament_player_id,
+        player2_tournament_player_id, winner_tournament_player_id, stage_name, round_name,
+        player1_name, player2_name, player1_score, player2_score,
+        winner_name, status, raw_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			tournamentID,
+			attemptID,
+			match.MatchKey,
+			intPointerValue(player1ID),
+			intPointerValue(player2ID),
+			intPointerValue(winnerID),
+			stringPointerValue(match.StageName),
+			stringPointerValue(match.RoundName),
+			stringPointerValue(match.Player1Name),
+			stringPointerValue(match.Player2Name),
+			intPointerValue(match.Player1Score),
+			intPointerValue(match.Player2Score),
+			stringPointerValue(match.WinnerName),
+			stringPointerValue(match.Status),
+			string(rawJSON),
+		); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+func (r *Repository) GetDependentCounts(tournamentID int) (int, int, error) {
+	var playerCount int
+	if err := r.db.QueryRow(`SELECT COUNT(*) FROM tournament_players WHERE tournament_id = ?`, tournamentID).Scan(&playerCount); err != nil {
+		return 0, 0, err
+	}
+	var matchCount int
+	if err := r.db.QueryRow(`SELECT COUNT(*) FROM matches WHERE tournament_id = ?`, tournamentID).Scan(&matchCount); err != nil {
+		return 0, 0, err
+	}
+	return playerCount, matchCount, nil
+}
+
+func (r *Repository) resolveCanonicalPlayerIDTx(tx *sql.Tx, player ParsedTournamentPlayer) (int, error) {
+	if player.BraacketLeaguePlayerID != nil {
+		if id, err := r.getCanonicalPlayerIDFromAliasTx(tx, "league_id", *player.BraacketLeaguePlayerID); err != nil {
+			return 0, err
+		} else if id != nil {
+			if err := r.touchCanonicalPlayerTx(tx, *id, player.Name, player.BraacketPlayerID); err != nil {
+				return 0, err
+			}
+			return *id, nil
+		}
+	} else {
+		normalized := canonicalizePlayerName(player.Name)
+		if id, err := r.getCanonicalPlayerIDFromAliasTx(tx, "normalized_name", normalized); err != nil {
+			return 0, err
+		} else if id != nil {
+			if err := r.touchCanonicalPlayerTx(tx, *id, player.Name, player.BraacketPlayerID); err != nil {
+				return 0, err
+			}
+			return *id, nil
+		}
+	}
+
+	identityKey := playerIdentityKey(player.Name, player.BraacketLeaguePlayerID)
+	_, err := tx.Exec(
+		`INSERT INTO players (
+       canonical_name, braacket_league_player_id, braacket_player_id, name, first_seen_at, last_seen_at
+     ) VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(canonical_name) DO UPDATE SET
+       name = excluded.name,
+       braacket_league_player_id = COALESCE(players.braacket_league_player_id, excluded.braacket_league_player_id),
+       braacket_player_id = COALESCE(players.braacket_player_id, excluded.braacket_player_id),
+       last_seen_at = excluded.last_seen_at`,
+		identityKey,
+		stringPointerValue(player.BraacketLeaguePlayerID),
+		stringPointerValue(player.BraacketPlayerID),
+		player.Name,
+		nowISO(),
+		nowISO(),
+	)
+	if err != nil {
+		return 0, err
+	}
+	var id int
+	if err := tx.QueryRow(`SELECT id FROM players WHERE canonical_name = ?`, identityKey).Scan(&id); err != nil {
+		return 0, err
+	}
+	return id, nil
+}
+
+func (r *Repository) getCanonicalPlayerIDFromAliasTx(tx *sql.Tx, aliasType string, aliasValue string) (*int, error) {
+	var id int
+	err := tx.QueryRow(
+		`SELECT canonical_player_id
+     FROM player_identity_aliases
+     WHERE alias_type = ? AND alias_value = ?`,
+		aliasType,
+		aliasValue,
+	).Scan(&id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &id, nil
+}
+
+func (r *Repository) touchCanonicalPlayerTx(tx *sql.Tx, playerID int, name string, braacketPlayerID *string) error {
+	_, err := tx.Exec(
+		`UPDATE players
+     SET name = ?, braacket_player_id = COALESCE(braacket_player_id, ?), last_seen_at = ?
+     WHERE id = ?`,
+		name,
+		stringPointerValue(braacketPlayerID),
+		nowISO(),
+		playerID,
+	)
+	return err
+}
+
+func resolveTournamentPlayerID(byBraacketID map[string]int, byName map[string]int, braacketPlayerID *string, name *string) *int {
+	if braacketPlayerID != nil {
+		if id, ok := byBraacketID[*braacketPlayerID]; ok {
+			return &id
+		}
+	}
+	if name != nil {
+		if id, ok := byName[*name]; ok {
+			return &id
+		}
+	}
+	return nil
+}
+
+func canonicalizePlayerName(name string) string {
+	return strings.ToLower(strings.Join(strings.Fields(name), " "))
+}
+
+func playerIdentityKey(name string, braacketLeaguePlayerID *string) string {
+	if braacketLeaguePlayerID != nil && *braacketLeaguePlayerID != "" {
+		return "league:" + *braacketLeaguePlayerID
+	}
+	return "name:" + canonicalizePlayerName(name)
+}
+
+func intPointersToSlice(values []*int) []any {
+	result := make([]any, 0, len(values))
+	for _, value := range values {
+		if value == nil {
+			result = append(result, nil)
+			continue
+		}
+		result = append(result, *value)
+	}
+	return result
+}
+
+func boolToInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
 }
 
 func scanTournament(scanner interface{ Scan(...any) error }) (*TournamentRecord, error) {

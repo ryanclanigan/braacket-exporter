@@ -271,7 +271,7 @@ func extractRowContext(html string, index int) string {
 }
 
 func textContent(value string) string {
-	return strings.Join(strings.Fields(value), " ")
+	return strings.Join(strings.Fields(stripTags(value)), " ")
 }
 
 func stripTags(value string) string {
