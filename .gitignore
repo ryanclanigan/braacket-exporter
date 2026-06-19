@@ -8,4 +8,5 @@ braacket.sqlite
 *.sqlite-wal
 .DS_Store
 .cache/
+.tmp/
 /server
