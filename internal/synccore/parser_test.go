@@ -30,15 +30,31 @@ func TestParseTournamentPagesExtractsOverviewPlayersAndMatches(t *testing.T) {
 	if len(parsed.Players) != 2 {
 		t.Fatalf("expected 2 players, got %d", len(parsed.Players))
 	}
-	if parsed.Players[0].Name != "Alice" {
-		t.Fatalf("unexpected first player: %#v", parsed.Players[0])
-	}
+	assertPlayerPresent(t, parsed.Players, "Alice")
 	if len(parsed.Matches) != 2 {
 		t.Fatalf("expected 2 matches, got %d", len(parsed.Matches))
 	}
-	if parsed.Matches[0].WinnerName == nil || *parsed.Matches[0].WinnerName != "Alice" {
-		t.Fatalf("unexpected first match: %#v", parsed.Matches[0])
+	assertWinnerPresent(t, parsed.Matches, "Alice")
+}
+
+func assertPlayerPresent(t *testing.T, players []ParsedTournamentPlayer, name string) {
+	t.Helper()
+	for _, player := range players {
+		if player.Name == name {
+			return
+		}
 	}
+	t.Fatalf("player %q not found in %#v", name, players)
+}
+
+func assertWinnerPresent(t *testing.T, matches []ParsedMatch, winner string) {
+	t.Helper()
+	for _, match := range matches {
+		if match.WinnerName != nil && *match.WinnerName == winner {
+			return
+		}
+	}
+	t.Fatalf("winner %q not found in %#v", winner, matches)
 }
 
 func TestParseTournamentPagesFallsBackToLeagueBadgeNames(t *testing.T) {

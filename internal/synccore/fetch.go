@@ -343,7 +343,6 @@ func (s *BrowserSession) FetchHTML(rawURL string, referer string) FetchOutcome {
 func (s *BrowserSession) applyHeaders(req *http.Request, target *url.URL, referer string) {
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
 	req.Header.Set("Accept-Language", s.profile.AcceptLanguage)
-	req.Header.Set("Accept-Encoding", "gzip, deflate, br")
 	req.Header.Set("Cache-Control", "max-age=0")
 	req.Header.Set("Connection", "keep-alive")
 	req.Header.Set("Sec-CH-UA", s.profile.SecCHUA)

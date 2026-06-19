@@ -111,6 +111,31 @@ func TestBrowserSessionClassifiesAntiBot(t *testing.T) {
 	}
 }
 
+func TestBrowserSessionDoesNotForceAcceptEncoding(t *testing.T) {
+	client := roundTripClient(func(req *http.Request) (*http.Response, error) {
+		if req.Header.Get("Accept-Encoding") != "" {
+			t.Fatalf("expected no explicit Accept-Encoding header, got %q", req.Header.Get("Accept-Encoding"))
+		}
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader("<html>ok</html>")),
+			Header:     make(http.Header),
+		}, nil
+	})
+	session := NewBrowserSession(filepath.Join(t.TempDir(), "cookies.json"), HeaderProfile{}, RetryPolicy{
+		RequestTimeout:      2 * time.Second,
+		MaxRequestRetries:   0,
+		MaxTournamentRetries: 1,
+		InitialBackoff:      time.Millisecond,
+		MaxBackoff:          time.Millisecond,
+		TournamentDeadline:  5 * time.Second,
+	}, client)
+	outcome := session.FetchHTML("https://braacket.com/league/comelee/tournament", "")
+	if !outcome.OK || outcome.HTML == nil || *outcome.HTML != "<html>ok</html>" {
+		t.Fatalf("expected HTML body, got %#v", outcome)
+	}
+}
+
 type roundTripClient func(req *http.Request) (*http.Response, error)
 
 func (f roundTripClient) Do(req *http.Request) (*http.Response, error) {
