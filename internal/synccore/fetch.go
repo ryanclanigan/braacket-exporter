@@ -7,21 +7,26 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
 type RetryPolicy struct {
-	RequestTimeout      time.Duration
-	MaxRequestRetries   int
+	RequestTimeout       time.Duration
+	MaxRequestRetries    int
 	MaxTournamentRetries int
-	InitialBackoff      time.Duration
-	MaxBackoff          time.Duration
-	TournamentDeadline  time.Duration
+	InitialBackoff       time.Duration
+	MaxBackoff           time.Duration
+	RateLimitBackoff     time.Duration
+	RequestSpacing       time.Duration
+	RequestSpacingJitter time.Duration
+	TournamentDeadline   time.Duration
 }
 
 type HTTPDoer interface {
@@ -163,11 +168,14 @@ func parseSetCookie(target *url.URL, raw string) *CookieRecord {
 }
 
 type BrowserSession struct {
-	jar     *CookieJar
-	profile HeaderProfile
-	policy  RetryPolicy
-	client  HTTPDoer
-	sleepFn func(time.Duration)
+	jar           *CookieJar
+	profile       HeaderProfile
+	policy        RetryPolicy
+	client        HTTPDoer
+	sleepFn       func(time.Duration)
+	randomJitter  func(time.Duration) time.Duration
+	pacingMu      sync.Mutex
+	lastRequestAt time.Time
 }
 
 func NewBrowserSession(jarPath string, profile HeaderProfile, policy RetryPolicy, client HTTPDoer) *BrowserSession {
@@ -180,6 +188,12 @@ func NewBrowserSession(jarPath string, profile HeaderProfile, policy RetryPolicy
 		policy:  policy,
 		client:  client,
 		sleepFn: time.Sleep,
+		randomJitter: func(limit time.Duration) time.Duration {
+			if limit <= 0 {
+				return 0
+			}
+			return time.Duration(rand.Int63n(int64(limit) + 1))
+		},
 	}
 }
 
@@ -211,6 +225,7 @@ func (s *BrowserSession) FetchHTML(rawURL string, referer string) FetchOutcome {
 			}
 		}
 
+		s.waitForRequestSpacing()
 		ctx, cancel := context.WithTimeout(context.Background(), s.policy.RequestTimeout)
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 		if err != nil {
@@ -252,7 +267,7 @@ func (s *BrowserSession) FetchHTML(rawURL string, referer string) FetchOutcome {
 					ErrorMessage: lastErrorMessage,
 				}
 			}
-			s.sleepFn(backoffDelay(s.policy, attempt))
+			s.sleepFn(retryDelay(s.policy, attempt, nil))
 			continue
 		}
 
@@ -324,7 +339,7 @@ func (s *BrowserSession) FetchHTML(rawURL string, referer string) FetchOutcome {
 				ErrorMessage: lastErrorMessage,
 			}
 		}
-		s.sleepFn(backoffDelay(s.policy, attempt))
+		s.sleepFn(retryDelay(s.policy, attempt, &status))
 	}
 
 	return FetchOutcome{
@@ -339,6 +354,27 @@ func (s *BrowserSession) FetchHTML(rawURL string, referer string) FetchOutcome {
 		ErrorClass:   lastErrorClass,
 		ErrorMessage: lastErrorMessage,
 	}
+}
+
+func (s *BrowserSession) waitForRequestSpacing() {
+	if s.policy.RequestSpacing <= 0 {
+		return
+	}
+	s.pacingMu.Lock()
+	defer s.pacingMu.Unlock()
+
+	now := time.Now()
+	targetSpacing := s.policy.RequestSpacing + s.randomJitter(s.policy.RequestSpacingJitter)
+	if s.lastRequestAt.IsZero() {
+		s.lastRequestAt = now
+		return
+	}
+	nextAllowed := s.lastRequestAt.Add(targetSpacing)
+	if nextAllowed.After(now) {
+		s.sleepFn(nextAllowed.Sub(now))
+		now = nextAllowed
+	}
+	s.lastRequestAt = now
 }
 
 func (s *BrowserSession) applyHeaders(req *http.Request, target *url.URL, referer string) {
@@ -375,6 +411,14 @@ func backoffDelay(policy RetryPolicy, attempt int) time.Duration {
 	}
 	if delay > policy.MaxBackoff {
 		return policy.MaxBackoff
+	}
+	return delay
+}
+
+func retryDelay(policy RetryPolicy, attempt int, status *int) time.Duration {
+	delay := backoffDelay(policy, attempt)
+	if status != nil && *status == http.StatusTooManyRequests && policy.RateLimitBackoff > delay {
+		delay = policy.RateLimitBackoff
 	}
 	return delay
 }

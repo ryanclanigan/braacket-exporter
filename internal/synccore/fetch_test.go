@@ -68,12 +68,16 @@ func TestBrowserSessionRetriesAndPersistsCookie(t *testing.T) {
 		SecCHUAPlatform: `"macOS"`,
 		AcceptLanguage:  "en-US",
 	}, RetryPolicy{
-		RequestTimeout:    2 * time.Second,
-		MaxRequestRetries: 1,
-		InitialBackoff:    time.Millisecond,
-		MaxBackoff:        time.Millisecond,
+		RequestTimeout:       2 * time.Second,
+		MaxRequestRetries:    1,
+		InitialBackoff:       time.Millisecond,
+		MaxBackoff:           time.Millisecond,
+		RateLimitBackoff:     time.Millisecond,
+		RequestSpacing:       0,
+		RequestSpacingJitter: 0,
 	}, client)
 	session.sleepFn = func(time.Duration) {}
+	session.randomJitter = func(time.Duration) time.Duration { return 0 }
 
 	if err := session.Init(); err != nil {
 		t.Fatal(err)
@@ -99,10 +103,13 @@ func TestBrowserSessionClassifiesAntiBot(t *testing.T) {
 		}, nil
 	})
 	session := NewBrowserSession(filepath.Join(t.TempDir(), "cookies.json"), HeaderProfile{}, RetryPolicy{
-		RequestTimeout:    2 * time.Second,
-		MaxRequestRetries: 0,
-		InitialBackoff:    time.Millisecond,
-		MaxBackoff:        time.Millisecond,
+		RequestTimeout:       2 * time.Second,
+		MaxRequestRetries:    0,
+		InitialBackoff:       time.Millisecond,
+		MaxBackoff:           time.Millisecond,
+		RateLimitBackoff:     time.Millisecond,
+		RequestSpacing:       0,
+		RequestSpacingJitter: 0,
 	}, client)
 	outcome := session.FetchHTML("https://braacket.com/league/comelee/tournament", "")
 	if outcome.OK {
@@ -125,12 +132,15 @@ func TestBrowserSessionDoesNotForceAcceptEncoding(t *testing.T) {
 		}, nil
 	})
 	session := NewBrowserSession(filepath.Join(t.TempDir(), "cookies.json"), HeaderProfile{}, RetryPolicy{
-		RequestTimeout:      2 * time.Second,
-		MaxRequestRetries:   0,
+		RequestTimeout:       2 * time.Second,
+		MaxRequestRetries:    0,
 		MaxTournamentRetries: 1,
-		InitialBackoff:      time.Millisecond,
-		MaxBackoff:          time.Millisecond,
-		TournamentDeadline:  5 * time.Second,
+		InitialBackoff:       time.Millisecond,
+		MaxBackoff:           time.Millisecond,
+		RateLimitBackoff:     time.Millisecond,
+		RequestSpacing:       0,
+		RequestSpacingJitter: 0,
+		TournamentDeadline:   5 * time.Second,
 	}, client)
 	outcome := session.FetchHTML("https://braacket.com/league/comelee/tournament", "")
 	if !outcome.OK || outcome.HTML == nil || *outcome.HTML != "<html>ok</html>" {
@@ -150,16 +160,95 @@ func TestBrowserSessionKeepsContextAliveWhileReadingBody(t *testing.T) {
 		}, nil
 	})
 	session := NewBrowserSession(filepath.Join(t.TempDir(), "cookies.json"), HeaderProfile{}, RetryPolicy{
-		RequestTimeout:      2 * time.Second,
-		MaxRequestRetries:   0,
+		RequestTimeout:       2 * time.Second,
+		MaxRequestRetries:    0,
 		MaxTournamentRetries: 1,
-		InitialBackoff:      time.Millisecond,
-		MaxBackoff:          time.Millisecond,
-		TournamentDeadline:  5 * time.Second,
+		InitialBackoff:       time.Millisecond,
+		MaxBackoff:           time.Millisecond,
+		RateLimitBackoff:     time.Millisecond,
+		RequestSpacing:       0,
+		RequestSpacingJitter: 0,
+		TournamentDeadline:   5 * time.Second,
 	}, client)
 	outcome := session.FetchHTML("https://braacket.com/league/comelee/tournament", "")
 	if !outcome.OK || outcome.HTML == nil || *outcome.HTML != "<html>ok</html>" {
 		t.Fatalf("expected HTML body, got %#v", outcome)
+	}
+}
+
+func TestBrowserSessionUsesRateLimitBackoffFor429(t *testing.T) {
+	sleepDurations := []time.Duration{}
+	attempts := 0
+	client := roundTripClient(func(req *http.Request) (*http.Response, error) {
+		attempts += 1
+		if attempts == 1 {
+			return &http.Response{
+				StatusCode: 429,
+				Body:       io.NopCloser(strings.NewReader("too many requests")),
+				Header:     make(http.Header),
+			}, nil
+		}
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader("<html>ok</html>")),
+			Header:     make(http.Header),
+		}, nil
+	})
+	session := NewBrowserSession(filepath.Join(t.TempDir(), "cookies.json"), HeaderProfile{}, RetryPolicy{
+		RequestTimeout:       2 * time.Second,
+		MaxRequestRetries:    1,
+		InitialBackoff:       time.Second,
+		MaxBackoff:           2 * time.Second,
+		RateLimitBackoff:     15 * time.Second,
+		RequestSpacing:       0,
+		RequestSpacingJitter: 0,
+	}, client)
+	session.sleepFn = func(delay time.Duration) { sleepDurations = append(sleepDurations, delay) }
+	session.randomJitter = func(time.Duration) time.Duration { return 0 }
+
+	outcome := session.FetchHTML("https://braacket.com/league/comelee/tournament", "")
+	if !outcome.OK {
+		t.Fatalf("expected success, got %#v", outcome)
+	}
+	if len(sleepDurations) == 0 || sleepDurations[0] != 15*time.Second {
+		t.Fatalf("expected 15s rate limit backoff, got %#v", sleepDurations)
+	}
+}
+
+func TestBrowserSessionSpacesRequests(t *testing.T) {
+	callCount := 0
+	sleepDurations := []time.Duration{}
+	client := roundTripClient(func(req *http.Request) (*http.Response, error) {
+		callCount += 1
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader("<html>ok</html>")),
+			Header:     make(http.Header),
+		}, nil
+	})
+	session := NewBrowserSession(filepath.Join(t.TempDir(), "cookies.json"), HeaderProfile{}, RetryPolicy{
+		RequestTimeout:       2 * time.Second,
+		MaxRequestRetries:    0,
+		InitialBackoff:       time.Second,
+		MaxBackoff:           2 * time.Second,
+		RateLimitBackoff:     15 * time.Second,
+		RequestSpacing:       25 * time.Millisecond,
+		RequestSpacingJitter: 0,
+	}, client)
+	session.sleepFn = func(delay time.Duration) { sleepDurations = append(sleepDurations, delay) }
+	session.randomJitter = func(time.Duration) time.Duration { return 0 }
+	session.lastRequestAt = time.Now()
+
+	_ = session.FetchHTML("https://braacket.com/one", "")
+	_ = session.FetchHTML("https://braacket.com/two", "")
+	if callCount != 2 {
+		t.Fatalf("expected 2 requests, got %d", callCount)
+	}
+	if len(sleepDurations) < 2 {
+		t.Fatalf("expected request spacing sleeps, got %#v", sleepDurations)
+	}
+	if sleepDurations[0] <= 0 || sleepDurations[1] <= 0 {
+		t.Fatalf("expected positive spacing sleeps, got %#v", sleepDurations)
 	}
 }
 

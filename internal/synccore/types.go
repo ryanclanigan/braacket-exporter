@@ -60,11 +60,14 @@ type SyncConfig struct {
 
 func DefaultRetryPolicy() RetryPolicy {
 	return RetryPolicy{
-		RequestTimeout:    45 * time.Second,
-		MaxRequestRetries: 2,
+		RequestTimeout:       45 * time.Second,
+		MaxRequestRetries:    2,
 		MaxTournamentRetries: 3,
-		InitialBackoff:    1500 * time.Millisecond,
-		MaxBackoff:        12 * time.Second,
-		TournamentDeadline: 90 * time.Second,
+		InitialBackoff:       1500 * time.Millisecond,
+		MaxBackoff:           12 * time.Second,
+		RateLimitBackoff:     30 * time.Second,
+		RequestSpacing:       700 * time.Millisecond,
+		RequestSpacingJitter: 350 * time.Millisecond,
+		TournamentDeadline:   90 * time.Second,
 	}
 }
