@@ -82,6 +82,7 @@ This order is deliberate:
 - cached ranking snapshots keyed by system and filter set
 - player rating history over time
 - ranking runs and invalidation metadata
+- region tracking parity with the Bun-side data model and admin flows
 
 ## Why Not Stay Bun-Only
 
