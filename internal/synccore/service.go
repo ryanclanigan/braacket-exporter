@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 )
@@ -48,6 +49,7 @@ func (s *Service) Run() error {
 	if err != nil {
 		return err
 	}
+	log.Printf("[sync] Starting queue run")
 	if err := s.prepareQueueForProcessing(); err != nil {
 		_ = s.repo.FinishRun(runID, "failed", err.Error())
 		return err
@@ -69,6 +71,7 @@ func (s *Service) SyncEvent(idOrURL string, force bool) error {
 		_ = s.repo.FinishRun(runID, "failed", err.Error())
 		return err
 	}
+	log.Printf("[sync] Importing one tournament: %s%s", s.describeTournament(tournament), forceSuffix(force))
 	if force {
 		if err := s.repo.ResetTournament(tournament.ID); err != nil {
 			_ = s.repo.FinishRun(runID, "failed", err.Error())
@@ -100,6 +103,7 @@ func (s *Service) ResetEvent(idOrURL string) error {
 		_ = s.repo.FinishRun(runID, "failed", err.Error())
 		return err
 	}
+	log.Printf("[sync] Resetting tournament: %s", s.describeTournament(tournament))
 	if err := s.repo.ResetTournament(tournament.ID); err != nil {
 		_ = s.repo.FinishRun(runID, "failed", err.Error())
 		return err
@@ -112,6 +116,7 @@ func (s *Service) processQueue(runID int, force bool) error {
 	if err != nil {
 		return err
 	}
+	log.Printf("[sync] Queue contains %d tournament(s) ready to process", len(pendingIDs))
 	for _, tournamentID := range pendingIDs {
 		tournament, err := s.repo.GetTournamentByID(tournamentID)
 		if err != nil {
@@ -124,6 +129,7 @@ func (s *Service) processQueue(runID int, force bool) error {
 			if err := s.repo.IncrementRunCounter(runID, "skipped_count", 1); err != nil {
 				return err
 			}
+			log.Printf("[sync] Skipping already imported tournament: %s", s.describeTournament(tournament))
 			continue
 		}
 		if err := s.importTournament(runID, tournament); err != nil {
@@ -171,6 +177,7 @@ func (s *Service) importTournament(runID int, tournament *TournamentRecord) erro
 	if err != nil {
 		return err
 	}
+	log.Printf("[sync] Processing tournament %s (attempt %d/%d)", s.describeTournament(tournament), tournament.RetryCount+1, s.maxTournamentRetries)
 
 	statuses := []*int{}
 	requestCount := 0
@@ -205,9 +212,15 @@ func (s *Service) importTournament(runID int, tournament *TournamentRecord) erro
 		if err := s.repo.IncrementRunCounter(runID, "failed_count", 1); err != nil {
 			return err
 		}
+		if retryable {
+			log.Printf("[sync] Import failed for %s: %s; retry scheduled at %s", s.describeTournament(tournament), message, valueOrEmpty(nextRetryAt, ""))
+		} else {
+			log.Printf("[sync] Import failed for %s: %s; marked terminal", s.describeTournament(tournament), message)
+		}
 		return fmt.Errorf(message)
 	}
 
+	log.Printf("[sync] Fetching overview page for %s", tournament.BraacketID)
 	overview, err := s.fetchTournamentPage(runID, tournament.ID, attemptID, tournament.URL, "tournament", "")
 	if err != nil {
 		return finishFailure(err.Error())
@@ -245,6 +258,7 @@ func (s *Service) importTournament(runID int, tournament *TournamentRecord) erro
 	if err != nil {
 		return finishFailure(err.Error())
 	}
+	log.Printf("[sync] Parsed %d player(s) and %d match(es) for %s", len(parsed.Players), len(parsed.Matches), tournament.BraacketID)
 	if err := s.repo.RewriteTournamentData(tournament.ID, attemptID, parsed); err != nil {
 		return finishFailure(err.Error())
 	}
@@ -259,6 +273,7 @@ func (s *Service) importTournament(runID int, tournament *TournamentRecord) erro
 	}); err != nil {
 		return err
 	}
+	log.Printf("[sync] Imported %s successfully", s.describeTournament(tournament))
 	return s.repo.IncrementRunCounter(runID, "imported_count", 1)
 }
 
@@ -290,6 +305,7 @@ func (s *Service) fetchPlayerPages(runID int, tournamentID int, attemptID int, b
 			return htmlFragments, httpStatuses, requestCount, pagesFetched, lastFetchedURL, err
 		}
 		lastFetchedURL = &pageURL
+		log.Printf("[sync] Fetching players page %d/%d for %s", page, totalPages, braacketID)
 		outcome, err := s.fetchTournamentPage(runID, tournamentID, attemptID, pageURL, "players", referer)
 		requestCount += outcome.AttemptCount
 		httpStatuses = append(httpStatuses, outcome.Status)
@@ -322,7 +338,9 @@ func (s *Service) fetchMatchPages(runID int, tournamentID int, attemptID int, to
 	}
 	htmlFragments = append(htmlFragments, *basePage.HTML)
 	_, otherStageURLs := ParseMatchStageURLs(*basePage.HTML, tournamentURL)
+	log.Printf("[sync] Fetching matches page for %s", braacketID)
 	for _, stageURL := range otherStageURLs {
+		log.Printf("[sync] Fetching additional stage page for %s: %s", braacketID, stageURL)
 		stagePage, err := s.fetchTournamentPage(runID, tournamentID, attemptID, stageURL, "matches", baseMatchesURL)
 		requestCount += stagePage.AttemptCount
 		httpStatuses = append(httpStatuses, stagePage.Status)
@@ -338,13 +356,40 @@ func (s *Service) fetchMatchPages(runID int, tournamentID int, attemptID int, to
 }
 
 func (s *Service) prepareQueueForProcessing() error {
-	if _, err := s.repo.RepairQueuedImportedState(); err != nil {
+	repairedQueuedImported, err := s.repo.RepairQueuedImportedState()
+	if err != nil {
 		return err
 	}
-	if _, err := s.repo.RequeueInProgress(); err != nil {
+	if repairedQueuedImported > 0 {
+		log.Printf("[sync] Repaired %d queued tournament(s) that already had imported data", repairedQueuedImported)
+	}
+	requeuedInProgress, err := s.repo.RequeueInProgress()
+	if err != nil {
 		return err
+	}
+	if requeuedInProgress > 0 {
+		log.Printf("[sync] Requeued %d in-progress tournament(s)", requeuedInProgress)
+	} else {
+		log.Printf("[sync] Found no in-progress tournaments")
 	}
 	return nil
+}
+
+func (s *Service) describeTournament(tournament *TournamentRecord) string {
+	if tournament == nil {
+		return ""
+	}
+	if tournament.Name.Valid && tournament.Name.String != "" {
+		return fmt.Sprintf("%s (%s)", tournament.BraacketID, tournament.Name.String)
+	}
+	return tournament.BraacketID
+}
+
+func forceSuffix(force bool) string {
+	if force {
+		return " [force]"
+	}
+	return ""
 }
 
 func valueOrEmpty(value *string, fallback string) string {

@@ -3,6 +3,7 @@ package synccore
 import (
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -50,12 +51,18 @@ func (s *DiscoveryService) Discover() (int, error) {
 	discovered := 0
 	seenPageBodies := map[string]struct{}{}
 	pageCountHint := 0
+	log.Printf("[discover] Starting discovery for %s", s.config.ListingURL)
 
 	for page := 1; page <= s.config.DiscoverMaxPages; page += 1 {
 		pageURL, err := buildDiscoveryPageURL(s.config.ListingURL, s.config.DiscoverPageSize, page)
 		if err != nil {
 			_ = s.repo.FinishRun(runID, "failed", err.Error())
 			return discovered, err
+		}
+		if pageCountHint > 0 {
+			log.Printf("[discover] Fetching page %d/%d: %s", page, pageCountHint, pageURL)
+		} else {
+			log.Printf("[discover] Fetching page %d: %s", page, pageURL)
 		}
 
 		body, status, err := s.fetchListingPage(pageURL)
@@ -82,6 +89,7 @@ func (s *DiscoveryService) Discover() (int, error) {
 		}
 
 		if _, seen := seenPageBodies[body]; seen {
+			log.Printf("[discover] Page %d duplicated a prior response body; stopping", page)
 			break
 		}
 		seenPageBodies[body] = struct{}{}
@@ -90,10 +98,13 @@ func (s *DiscoveryService) Discover() (int, error) {
 		if pageCountHint == 0 && parsed.NextPageCountHint > 0 {
 			pageCountHint = parsed.NextPageCountHint
 		}
+		log.Printf("[discover] Page %d returned %d tournament(s)", page, len(parsed.Tournaments))
 		if len(parsed.Tournaments) == 0 {
+			log.Printf("[discover] Page %d had no tournaments; stopping", page)
 			break
 		}
 
+		pageDiscovered := 0
 		for _, tournament := range parsed.Tournaments {
 			existing, err := s.repo.GetTournamentByBraacketID(tournament.BraacketID)
 			if err != nil && err.Error() != "sql: no rows in result set" {
@@ -106,18 +117,22 @@ func (s *DiscoveryService) Discover() (int, error) {
 			}
 			if existing == nil {
 				discovered += 1
+				pageDiscovered += 1
 				if err := s.repo.IncrementRunCounter(runID, "discovered_count", 1); err != nil {
 					_ = s.repo.FinishRun(runID, "failed", err.Error())
 					return discovered, err
 				}
 			}
 		}
+		log.Printf("[discover] Page %d discovered %d new tournament(s); total new=%d", page, pageDiscovered, discovered)
 
 		if pageCountHint > 0 && page >= pageCountHint {
+			log.Printf("[discover] Reached page hint %d; stopping", pageCountHint)
 			break
 		}
 	}
 
+	log.Printf("[discover] Discovery complete: %d newly discovered tournament(s)", discovered)
 	if err := s.repo.FinishRun(runID, "succeeded", fmt.Sprintf("Discovered %d tournaments", discovered)); err != nil {
 		return discovered, err
 	}
