@@ -18,6 +18,15 @@ type Service struct {
 	maxTournamentRetries int
 }
 
+type importFailureError struct {
+	message   string
+	retryable bool
+}
+
+func (e *importFailureError) Error() string {
+	return e.message
+}
+
 func NewService(repo *Repository, session *BrowserSession, config SyncConfig) *Service {
 	discoveryConfig := DiscoveryConfig{
 		ListingURL:       config.ListingURL,
@@ -133,6 +142,10 @@ func (s *Service) processQueue(runID int, force bool) error {
 			continue
 		}
 		if err := s.importTournament(runID, tournament); err != nil {
+			var importErr *importFailureError
+			if errors.As(err, &importErr) && importErr.retryable {
+				continue
+			}
 			return err
 		}
 	}
@@ -217,7 +230,10 @@ func (s *Service) importTournament(runID int, tournament *TournamentRecord) erro
 		} else {
 			log.Printf("[sync] Import failed for %s: %s; marked terminal", s.describeTournament(tournament), message)
 		}
-		return fmt.Errorf(message)
+		return &importFailureError{
+			message:   message,
+			retryable: retryable,
+		}
 	}
 
 	log.Printf("[sync] Fetching overview page for %s", tournament.BraacketID)
