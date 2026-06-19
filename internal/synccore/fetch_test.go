@@ -1,6 +1,8 @@
 package synccore
 
 import (
+	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -136,6 +138,31 @@ func TestBrowserSessionDoesNotForceAcceptEncoding(t *testing.T) {
 	}
 }
 
+func TestBrowserSessionKeepsContextAliveWhileReadingBody(t *testing.T) {
+	client := roundTripClient(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: 200,
+			Body: &contextAwareBody{
+				ctx:  req.Context(),
+				data: []byte("<html>ok</html>"),
+			},
+			Header: make(http.Header),
+		}, nil
+	})
+	session := NewBrowserSession(filepath.Join(t.TempDir(), "cookies.json"), HeaderProfile{}, RetryPolicy{
+		RequestTimeout:      2 * time.Second,
+		MaxRequestRetries:   0,
+		MaxTournamentRetries: 1,
+		InitialBackoff:      time.Millisecond,
+		MaxBackoff:          time.Millisecond,
+		TournamentDeadline:  5 * time.Second,
+	}, client)
+	outcome := session.FetchHTML("https://braacket.com/league/comelee/tournament", "")
+	if !outcome.OK || outcome.HTML == nil || *outcome.HTML != "<html>ok</html>" {
+		t.Fatalf("expected HTML body, got %#v", outcome)
+	}
+}
+
 type roundTripClient func(req *http.Request) (*http.Response, error)
 
 func (f roundTripClient) Do(req *http.Request) (*http.Response, error) {
@@ -148,4 +175,30 @@ func mustURL(raw string) *url.URL {
 		panic(err)
 	}
 	return parsed
+}
+
+type contextAwareBody struct {
+	ctx  context.Context
+	data []byte
+	read bool
+}
+
+func (b *contextAwareBody) Read(p []byte) (int, error) {
+	select {
+	case <-b.ctx.Done():
+		return 0, b.ctx.Err()
+	default:
+	}
+	if b.read {
+		return 0, io.EOF
+	}
+	b.read = true
+	return copy(p, b.data), nil
+}
+
+func (b *contextAwareBody) Close() error {
+	if err := b.ctx.Err(); err != nil && !errors.Is(err, context.Canceled) {
+		return err
+	}
+	return nil
 }

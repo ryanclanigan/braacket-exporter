@@ -229,8 +229,8 @@ func (s *BrowserSession) FetchHTML(rawURL string, referer string) FetchOutcome {
 		}
 		s.applyHeaders(req, target, referer)
 		resp, err := s.client.Do(req)
-		cancel()
 		if err != nil {
+			cancel()
 			class := "network_error"
 			if strings.Contains(strings.ToLower(err.Error()), "context deadline exceeded") {
 				class = "timeout"
@@ -258,6 +258,7 @@ func (s *BrowserSession) FetchHTML(rawURL string, referer string) FetchOutcome {
 
 		bodyBytes, readErr := io.ReadAll(resp.Body)
 		resp.Body.Close()
+		cancel()
 		if readErr != nil {
 			message := readErr.Error()
 			class := "network_error"
