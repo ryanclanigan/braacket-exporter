@@ -24,6 +24,7 @@ CREATE TABLE tournaments (
 );
 CREATE TABLE players (
   id INTEGER PRIMARY KEY,
+  braacket_league_player_id TEXT,
   name TEXT
 );
 CREATE TABLE tournament_players (
@@ -106,6 +107,7 @@ CREATE TABLE tournaments (
 CREATE TABLE players (
   id INTEGER PRIMARY KEY,
   canonical_name TEXT,
+  braacket_league_player_id TEXT,
   name TEXT,
   first_seen_at TEXT,
   last_seen_at TEXT
@@ -161,6 +163,70 @@ VALUES
 	}
 	if !strings.Contains(recorder.Body.String(), `"status": "ready"`) {
 		t.Fatalf("expected ready elo response: %s", recorder.Body.String())
+	}
+}
+
+func TestRegionAPIHandlers(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "regions.sqlite")
+	setupSQLiteFixture(t, dbPath, `
+CREATE TABLE players (
+  id INTEGER PRIMARY KEY,
+  canonical_name TEXT,
+  braacket_league_player_id TEXT,
+  name TEXT,
+  first_seen_at TEXT,
+  last_seen_at TEXT
+);
+CREATE TABLE tournament_players (
+  id INTEGER PRIMARY KEY,
+  tournament_id INTEGER,
+  canonical_player_id INTEGER
+);
+CREATE TABLE matches (
+  id INTEGER PRIMARY KEY,
+  player1_tournament_player_id INTEGER,
+  player2_tournament_player_id INTEGER
+);
+INSERT INTO players (id, canonical_name, braacket_league_player_id, name, first_seen_at, last_seen_at)
+VALUES
+  (1, 'league:lp1', 'lp1', 'Alice', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
+  (2, 'league:lp2', 'lp2', 'Bob', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+`)
+
+	server := &app{dbPath: dbPath}
+
+	assignRequest := httptest.NewRequest(http.MethodPost, "/api/regions/assign", strings.NewReader(`{"playerId":1,"region":"front-range","name":"Front Range"}`))
+	assignRequest.Header.Set("Content-Type", "application/json")
+	assignRecorder := httptest.NewRecorder()
+	server.handleAssignRegion(assignRecorder, assignRequest)
+	if assignRecorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", assignRecorder.Code, assignRecorder.Body.String())
+	}
+
+	listRecorder := httptest.NewRecorder()
+	server.handleRegions(listRecorder, httptest.NewRequest(http.MethodGet, "/api/regions", nil))
+	if listRecorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", listRecorder.Code, listRecorder.Body.String())
+	}
+	if !strings.Contains(listRecorder.Body.String(), `"slug": "front-range"`) {
+		t.Fatalf("expected front-range in region list: %s", listRecorder.Body.String())
+	}
+
+	playersRecorder := httptest.NewRecorder()
+	server.handlePlayers(playersRecorder, httptest.NewRequest(http.MethodGet, "/api/players?search=Ali", nil))
+	if playersRecorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", playersRecorder.Code, playersRecorder.Body.String())
+	}
+	if !strings.Contains(playersRecorder.Body.String(), `"regionSlug": "front-range"`) {
+		t.Fatalf("expected player search to include region mapping: %s", playersRecorder.Body.String())
+	}
+
+	unassignRequest := httptest.NewRequest(http.MethodPost, "/api/regions/unassign", strings.NewReader(`{"playerId":1}`))
+	unassignRequest.Header.Set("Content-Type", "application/json")
+	unassignRecorder := httptest.NewRecorder()
+	server.handleUnassignRegion(unassignRecorder, unassignRequest)
+	if unassignRecorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", unassignRecorder.Code, unassignRecorder.Body.String())
 	}
 }
 
@@ -221,6 +287,7 @@ CREATE TABLE tournaments (
 CREATE TABLE players (
   id INTEGER PRIMARY KEY,
   canonical_name TEXT,
+  braacket_league_player_id TEXT,
   name TEXT,
   first_seen_at TEXT,
   last_seen_at TEXT

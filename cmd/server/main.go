@@ -3,6 +3,7 @@ package main
 import (
 	"braacketreplacement/internal/colley"
 	"braacketreplacement/internal/elo"
+	"braacketreplacement/internal/regions"
 	"database/sql"
 	"embed"
 	"encoding/json"
@@ -39,9 +40,19 @@ type overviewResponse struct {
 }
 
 type playerSearchResult struct {
+	CanonicalPlayerID      int     `json:"canonicalPlayerId"`
+	Name                   string  `json:"name"`
+	BraacketLeaguePlayerID string  `json:"braacketLeaguePlayerId,omitempty"`
+	RegionSlug             string  `json:"regionSlug,omitempty"`
+	RegionName             string  `json:"regionName,omitempty"`
+	Tournaments            int     `json:"tournaments"`
+	Matches                int     `json:"matches"`
+}
+
+type regionResponse struct {
+	Slug        string `json:"slug"`
 	Name        string `json:"name"`
-	Tournaments int    `json:"tournaments"`
-	Matches     int    `json:"matches"`
+	PlayerCount int    `json:"playerCount"`
 }
 
 type rankingResponse struct {
@@ -89,6 +100,9 @@ func main() {
 	mux.HandleFunc("/api/health", server.handleHealth)
 	mux.HandleFunc("/api/overview", server.handleOverview)
 	mux.HandleFunc("/api/players", server.handlePlayers)
+	mux.HandleFunc("/api/regions", server.handleRegions)
+	mux.HandleFunc("/api/regions/assign", server.handleAssignRegion)
+	mux.HandleFunc("/api/regions/unassign", server.handleUnassignRegion)
 	mux.HandleFunc("/api/rankings", server.handleRankings)
 	mux.Handle("/", server.staticHandler())
 
@@ -171,18 +185,28 @@ func (a *app) handlePlayers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer db.Close()
+	if err := regions.ApplySchema(db); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
 
 	rows, err := db.Query(`SELECT
+  p.id,
   p.name,
+  p.braacket_league_player_id,
+  r.slug,
+  r.name,
   COUNT(DISTINCT tp.tournament_id) AS tournaments,
   COUNT(m.id) AS matches
 FROM players p
 LEFT JOIN tournament_players tp ON tp.canonical_player_id = p.id
+LEFT JOIN player_region_assignments pra ON pra.canonical_player_id = p.id
+LEFT JOIN regions r ON r.id = pra.region_id
 LEFT JOIN matches m
   ON m.player1_tournament_player_id = tp.id
   OR m.player2_tournament_player_id = tp.id
 WHERE p.name LIKE ?
-GROUP BY p.id, p.name
+GROUP BY p.id, p.name, p.braacket_league_player_id, r.slug, r.name
 ORDER BY tournaments DESC, matches DESC, p.name ASC
 LIMIT ?`, searchPattern, limit)
 	if err != nil {
@@ -194,9 +218,29 @@ LIMIT ?`, searchPattern, limit)
 	results := []playerSearchResult{}
 	for rows.Next() {
 		var result playerSearchResult
-		if err := rows.Scan(&result.Name, &result.Tournaments, &result.Matches); err != nil {
+		var leagueID sql.NullString
+		var regionSlug sql.NullString
+		var regionName sql.NullString
+		if err := rows.Scan(
+			&result.CanonicalPlayerID,
+			&result.Name,
+			&leagueID,
+			&regionSlug,
+			&regionName,
+			&result.Tournaments,
+			&result.Matches,
+		); err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return
+		}
+		if leagueID.Valid {
+			result.BraacketLeaguePlayerID = leagueID.String
+		}
+		if regionSlug.Valid {
+			result.RegionSlug = regionSlug.String
+		}
+		if regionName.Valid {
+			result.RegionName = regionName.String
 		}
 		results = append(results, result)
 	}
@@ -208,6 +252,125 @@ LIMIT ?`, searchPattern, limit)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"search":  search,
 		"results": results,
+	})
+}
+
+func (a *app) handleRegions(w http.ResponseWriter, r *http.Request) {
+	db, err := openAppDB(a.dbPath)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	defer db.Close()
+	if err := regions.ApplySchema(db); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	service := regions.NewService(db)
+	regionSlug := strings.TrimSpace(r.URL.Query().Get("region"))
+	search := strings.TrimSpace(r.URL.Query().Get("search"))
+	limit := atoiSafe(r.URL.Query().Get("limit"))
+
+	if regionSlug != "" {
+		players, err := service.ListRegionPlayers(regionSlug, search, limit)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"region":  regionSlug,
+			"search":  search,
+			"players": players,
+		})
+		return
+	}
+
+	rows, err := service.ListRegions()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	response := make([]regionResponse, 0, len(rows))
+	for _, row := range rows {
+		response = append(response, regionResponse{
+			Slug:        row.Slug,
+			Name:        row.Name,
+			PlayerCount: row.PlayerCount,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"regions": response,
+	})
+}
+
+func (a *app) handleAssignRegion(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, fmt.Errorf("method not allowed"))
+		return
+	}
+	var request struct {
+		PlayerID int    `json:"playerId"`
+		Region   string `json:"region"`
+		Name     string `json:"name"`
+		Note     string `json:"note"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	db, err := openAppDB(a.dbPath)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	defer db.Close()
+	if err := regions.ApplySchema(db); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	service := regions.NewService(db)
+	if err := service.AssignPlayerRegion(request.PlayerID, request.Region, request.Name, request.Note); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":   "ok",
+		"playerId": request.PlayerID,
+		"region":   request.Region,
+	})
+}
+
+func (a *app) handleUnassignRegion(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, fmt.Errorf("method not allowed"))
+		return
+	}
+	var request struct {
+		PlayerID int `json:"playerId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	db, err := openAppDB(a.dbPath)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	defer db.Close()
+	if err := regions.ApplySchema(db); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	service := regions.NewService(db)
+	if err := service.RemovePlayerRegion(request.PlayerID); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":   "ok",
+		"playerId": request.PlayerID,
 	})
 }
 
