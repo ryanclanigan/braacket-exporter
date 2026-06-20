@@ -10,3 +10,4 @@ braacket.sqlite
 .cache/
 .tmp/
 /server
+node_modules/
