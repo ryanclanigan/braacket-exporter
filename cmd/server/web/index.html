@@ -20,6 +20,7 @@
           <a href="#overview">Overview</a>
           <a href="#rankings">Rankings</a>
           <a href="#players">Players</a>
+          <a href="#regions">Regions</a>
           <a href="#rewrite">Rewrite</a>
         </nav>
       </aside>
@@ -121,6 +122,52 @@
           </form>
 
           <div id="player-results" class="player-list"></div>
+        </section>
+
+        <section id="regions" class="panel">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Region Admin</p>
+              <h3>Mappings</h3>
+            </div>
+          </div>
+
+          <div class="region-grid">
+            <div class="region-column">
+              <form id="region-search-form" class="filters compact">
+                <label>
+                  Player Search
+                  <input type="text" name="search" placeholder="Dial, Alice, Bob..." />
+                </label>
+                <button type="submit" class="button-secondary">Search</button>
+              </form>
+              <div id="region-search-results" class="player-list"></div>
+            </div>
+
+            <div class="region-column">
+              <form id="region-assign-form" class="filters region-form">
+                <label>
+                  Player ID
+                  <input type="number" name="playerId" min="1" required />
+                </label>
+                <label>
+                  Region Slug
+                  <input type="text" name="region" placeholder="front-range" required />
+                </label>
+                <label>
+                  Region Name
+                  <input type="text" name="name" placeholder="Front Range" />
+                </label>
+                <label>
+                  Note
+                  <input type="text" name="note" placeholder="optional" />
+                </label>
+                <button type="submit" class="button-primary">Assign Region</button>
+              </form>
+              <div id="region-feedback" class="callout muted">Assign or remove player region mappings here.</div>
+              <div id="region-list" class="region-list"></div>
+            </div>
+          </div>
         </section>
 
         <section id="rewrite" class="panel rewrite-panel">

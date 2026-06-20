@@ -2,8 +2,13 @@ const overviewCards = document.querySelector("#overview-cards");
 const rankingMeta = document.querySelector("#ranking-meta");
 const rankingRows = document.querySelector("#ranking-rows");
 const playerResults = document.querySelector("#player-results");
+const regionSearchResults = document.querySelector("#region-search-results");
+const regionList = document.querySelector("#region-list");
+const regionFeedback = document.querySelector("#region-feedback");
 const rankingForm = document.querySelector("#ranking-form");
 const playerForm = document.querySelector("#player-form");
+const regionSearchForm = document.querySelector("#region-search-form");
+const regionAssignForm = document.querySelector("#region-assign-form");
 const refreshOverviewButton = document.querySelector("#refresh-overview");
 const previousPageButton = document.querySelector("#previous-page");
 const nextPageButton = document.querySelector("#next-page");
@@ -106,9 +111,50 @@ function renderPlayers(data) {
         <article class="player-card">
           <div>
             <strong>${result.name}</strong>
+            <div class="muted">Player ID ${result.canonicalPlayerId}${result.regionName ? ` • ${result.regionName}` : ""}</div>
             <div class="muted">${result.tournaments} tournaments</div>
           </div>
           <div class="muted">${result.matches} indexed matches</div>
+        </article>
+      `
+    )
+    .join("");
+}
+
+function renderRegionSearch(data) {
+  const results = Array.isArray(data.results) ? data.results : [];
+  regionSearchResults.innerHTML = results
+    .map(
+      (result) => `
+        <article class="player-card">
+          <div>
+            <strong>${result.name}</strong>
+            <div class="muted">Player ID ${result.canonicalPlayerId}</div>
+            <div class="muted">${result.regionName ? `${result.regionName} (${result.regionSlug})` : "No region assigned"}</div>
+          </div>
+          <div class="stack-actions">
+            <button class="button-secondary" type="button" data-player-id="${result.canonicalPlayerId}" data-player-name="${result.name}" data-region-slug="${result.regionSlug || ""}">
+              ${result.regionSlug ? "Replace Mapping" : "Assign Mapping"}
+            </button>
+            ${result.regionSlug ? `<button class="button-secondary" type="button" data-unassign-player-id="${result.canonicalPlayerId}">Remove Mapping</button>` : ""}
+          </div>
+        </article>
+      `
+    )
+    .join("");
+}
+
+function renderRegions(data) {
+  const regions = Array.isArray(data.regions) ? data.regions : [];
+  regionList.innerHTML = regions
+    .map(
+      (region) => `
+        <article class="region-card">
+          <div>
+            <strong>${region.name}</strong>
+            <div class="muted">${region.slug}</div>
+          </div>
+          <div class="muted">${region.playerCount} mapped player${region.playerCount === 1 ? "" : "s"}</div>
         </article>
       `
     )
@@ -143,6 +189,48 @@ async function loadPlayers() {
   renderPlayers(data);
 }
 
+async function loadRegionSearch() {
+  regionSearchResults.innerHTML = `<div class="muted">Loading players...</div>`;
+  const params = new URLSearchParams(new FormData(regionSearchForm));
+  params.set("limit", "20");
+  const response = await fetch(`/api/players?${params.toString()}`);
+  const data = await response.json();
+  renderRegionSearch(data);
+}
+
+async function loadRegions() {
+  regionList.innerHTML = `<div class="muted">Loading regions...</div>`;
+  const response = await fetch("/api/regions");
+  const data = await response.json();
+  renderRegions(data);
+}
+
+async function assignRegion(payload) {
+  const response = await fetch("/api/regions/assign", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.error || "Failed to assign region");
+  }
+  regionFeedback.textContent = `Assigned player ${payload.playerId} to ${payload.region}.`;
+}
+
+async function unassignRegion(playerId) {
+  const response = await fetch("/api/regions/unassign", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ playerId }),
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.error || "Failed to remove region");
+  }
+  regionFeedback.textContent = `Removed region mapping for player ${playerId}.`;
+}
+
 rankingForm.addEventListener("submit", (event) => {
   event.preventDefault();
   rankingState.offset = 0;
@@ -152,6 +240,52 @@ rankingForm.addEventListener("submit", (event) => {
 playerForm.addEventListener("submit", (event) => {
   event.preventDefault();
   void loadPlayers();
+});
+
+regionSearchForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void loadRegionSearch();
+});
+
+regionAssignForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const formData = new FormData(regionAssignForm);
+  void (async () => {
+    try {
+      await assignRegion({
+        playerId: Number(formData.get("playerId")),
+        region: String(formData.get("region") || ""),
+        name: String(formData.get("name") || ""),
+        note: String(formData.get("note") || ""),
+      });
+      await loadRegionSearch();
+      await loadRegions();
+    } catch (error) {
+      regionFeedback.textContent = error instanceof Error ? error.message : String(error);
+    }
+  })();
+});
+
+regionSearchResults.addEventListener("click", (event) => {
+  const assignButton = event.target.closest("button[data-player-id]");
+  if (assignButton) {
+    regionAssignForm.elements.playerId.value = assignButton.dataset.playerId || "";
+    return;
+  }
+
+  const unassignButton = event.target.closest("button[data-unassign-player-id]");
+  if (!unassignButton) {
+    return;
+  }
+  void (async () => {
+    try {
+      await unassignRegion(Number(unassignButton.dataset.unassignPlayerId));
+      await loadRegionSearch();
+      await loadRegions();
+    } catch (error) {
+      regionFeedback.textContent = error instanceof Error ? error.message : String(error);
+    }
+  })();
 });
 
 refreshOverviewButton.addEventListener("click", () => {
@@ -172,3 +306,5 @@ setDefaultFilters();
 void loadOverview();
 void loadRankings();
 void loadPlayers();
+void loadRegionSearch();
+void loadRegions();
