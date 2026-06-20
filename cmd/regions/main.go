@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -179,7 +180,11 @@ func openDB(path string) (*sql.DB, error) {
 			return nil, err
 		}
 	}
-	return sql.Open("sqlite3", path)
+	query := url.Values{}
+	query.Set("_busy_timeout", "10000")
+	query.Set("_journal_mode", "WAL")
+	query.Set("_foreign_keys", "on")
+	return sql.Open("sqlite3", "file:"+path+"?"+query.Encode())
 }
 
 func envOrDefault(key string, fallback string) string {

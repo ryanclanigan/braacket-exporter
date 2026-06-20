@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -45,7 +46,7 @@ func Open(dbPath string, leagueSlug string) (*Repository, error) {
 			return nil, err
 		}
 	}
-	db, err := sql.Open("sqlite3", dbPath)
+	db, err := sql.Open("sqlite3", sqliteDSN(dbPath))
 	if err != nil {
 		return nil, err
 	}
@@ -665,4 +666,12 @@ func stringPointerValue(value *string) any {
 		return nil
 	}
 	return *value
+}
+
+func sqliteDSN(path string) string {
+	query := url.Values{}
+	query.Set("_busy_timeout", "10000")
+	query.Set("_journal_mode", "WAL")
+	query.Set("_foreign_keys", "on")
+	return "file:" + path + "?" + query.Encode()
 }

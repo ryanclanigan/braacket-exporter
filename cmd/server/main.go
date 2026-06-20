@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -563,7 +564,11 @@ func writeError(w http.ResponseWriter, status int, err error) {
 }
 
 func openAppDB(dbPath string) (*sql.DB, error) {
-	db, err := sql.Open("sqlite3", dbPath)
+	query := url.Values{}
+	query.Set("_busy_timeout", "10000")
+	query.Set("_journal_mode", "WAL")
+	query.Set("_foreign_keys", "on")
+	db, err := sql.Open("sqlite3", "file:"+dbPath+"?"+query.Encode())
 	if err != nil {
 		return nil, err
 	}
