@@ -11,3 +11,4 @@ braacket.sqlite
 .tmp/
 /server
 node_modules/
+test-results/
