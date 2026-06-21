@@ -3,6 +3,7 @@ package main
 import (
 	"braacketreplacement/internal/colley"
 	"braacketreplacement/internal/elo"
+	"braacketreplacement/internal/reconcile"
 	"braacketreplacement/internal/regions"
 	"braacketreplacement/internal/synccore"
 	"database/sql"
@@ -158,6 +159,28 @@ type syncSourcePageDetailResponse struct {
 	HTMLPreview string `json:"htmlPreview"`
 }
 
+type reconcileGroupResponse struct {
+	NormalizedName string                           `json:"normalizedName"`
+	Players        []reconcilePlayerSummaryResponse `json:"players"`
+}
+
+type reconcilePlayerSummaryResponse struct {
+	CanonicalPlayerID      int    `json:"canonicalPlayerId"`
+	CanonicalName          string `json:"canonicalName"`
+	BraacketLeaguePlayerID string `json:"braacketLeaguePlayerId,omitempty"`
+	Name                   string `json:"name"`
+	Tournaments            int    `json:"tournaments"`
+	Matches                int    `json:"matches"`
+}
+
+type reconcileRepairResultResponse struct {
+	NormalizedName              string   `json:"normalizedName"`
+	TargetCanonicalPlayerID     int      `json:"targetCanonicalPlayerID"`
+	MergedCanonicalPlayerIDs    []int    `json:"mergedCanonicalPlayerIDs"`
+	AliasValuesCreated          []string `json:"aliasValuesCreated"`
+	TournamentPlayerRowsUpdated int      `json:"tournamentPlayerRowsUpdated"`
+}
+
 type rankingCache struct {
 	mu    sync.RWMutex
 	items map[string]cachedRankingResult
@@ -200,6 +223,9 @@ func main() {
 	mux.HandleFunc("/api/sync/requeue", server.handleSyncRequeue)
 	mux.HandleFunc("/api/sync/reset", server.handleSyncReset)
 	mux.HandleFunc("/api/sync/import", server.handleSyncImport)
+	mux.HandleFunc("/api/reconcile/report", server.handleReconcileReport)
+	mux.HandleFunc("/api/reconcile/fix-mixed-name-only", server.handleReconcileFixMixedNameOnly)
+	mux.HandleFunc("/api/reconcile/fix-multiple-league-ids", server.handleReconcileFixMultipleLeagueIDs)
 	mux.Handle("/", server.staticHandler())
 
 	log.Printf("braacket replacement server listening on %s", server.addr)
@@ -829,6 +855,88 @@ func (a *app) handleSyncImport(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (a *app) handleReconcileReport(w http.ResponseWriter, r *http.Request) {
+	db, err := openReconcileDB(a.dbPath)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	defer db.Close()
+
+	limit := atoiSafe(r.URL.Query().Get("limit"))
+	if limit < 1 || limit > 200 {
+		limit = 50
+	}
+	report, err := reconcile.NewService(db).BuildIdentityReport(limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"multipleLeagueIds":      reconcileGroupsResponse(report.MultipleLeagueIDs),
+		"mixedLeagueAndNameOnly": reconcileGroupsResponse(report.MixedLeagueAndNameOnly),
+	})
+}
+
+func (a *app) handleReconcileFixMixedNameOnly(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, fmt.Errorf("method not allowed"))
+		return
+	}
+	var request struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	db, err := openReconcileDB(a.dbPath)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	defer db.Close()
+	result, err := reconcile.NewService(db).FixMixedLeagueAndNameOnly(request.Name)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": "ok",
+		"result": reconcileRepairResult(result),
+	})
+}
+
+func (a *app) handleReconcileFixMultipleLeagueIDs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, fmt.Errorf("method not allowed"))
+		return
+	}
+	var request struct {
+		Name         string `json:"name"`
+		KeepLeagueID string `json:"keepLeagueId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	db, err := openReconcileDB(a.dbPath)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	defer db.Close()
+	result, err := reconcile.NewService(db).FixMultipleLeagueIDs(request.Name, request.KeepLeagueID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": "ok",
+		"result": reconcileRepairResult(result),
+	})
+}
+
 func (a *app) getRankingPlayers(system string, startDate string, endDate string, minTournaments int, tournamentNameLike string) ([]map[string]interface{}, time.Time, error) {
 	cacheKey := strings.Join([]string{
 		system,
@@ -984,6 +1092,21 @@ func openSyncRepo(dbPath string) (*synccore.Repository, error) {
 	return repo, nil
 }
 
+func openReconcileDB(dbPath string) (*sql.DB, error) {
+	repo, err := synccore.Open(dbPath, "")
+	if err != nil {
+		return nil, err
+	}
+	if err := synccore.ApplySchema(repo); err != nil {
+		_ = repo.Close()
+		return nil, err
+	}
+	if err := repo.Close(); err != nil {
+		return nil, err
+	}
+	return openAppDB(dbPath)
+}
+
 func (a *app) newSyncRunner() (syncRunner, error) {
 	if a.syncRunnerFactory != nil {
 		return a.syncRunnerFactory()
@@ -1123,6 +1246,38 @@ func syncRunResponseFromRecord(item synccore.SyncRunSummary) syncRunResponse {
 		FailedCount:     item.FailedCount,
 		SkippedCount:    item.SkippedCount,
 		Summary:         item.Summary,
+	}
+}
+
+func reconcileGroupsResponse(groups []reconcile.IdentityReconcileGroup) []reconcileGroupResponse {
+	response := make([]reconcileGroupResponse, 0, len(groups))
+	for _, group := range groups {
+		players := make([]reconcilePlayerSummaryResponse, 0, len(group.Players))
+		for _, player := range group.Players {
+			players = append(players, reconcilePlayerSummaryResponse{
+				CanonicalPlayerID:      player.CanonicalPlayerID,
+				CanonicalName:          player.CanonicalName,
+				BraacketLeaguePlayerID: player.BraacketLeaguePlayerID,
+				Name:                   player.Name,
+				Tournaments:            player.Tournaments,
+				Matches:                player.Matches,
+			})
+		}
+		response = append(response, reconcileGroupResponse{
+			NormalizedName: group.NormalizedName,
+			Players:        players,
+		})
+	}
+	return response
+}
+
+func reconcileRepairResult(result reconcile.IdentityRepairResult) reconcileRepairResultResponse {
+	return reconcileRepairResultResponse{
+		NormalizedName:              result.NormalizedName,
+		TargetCanonicalPlayerID:     result.TargetCanonicalPlayerID,
+		MergedCanonicalPlayerIDs:    result.MergedCanonicalPlayerIDs,
+		AliasValuesCreated:          result.AliasValuesCreated,
+		TournamentPlayerRowsUpdated: result.TournamentPlayerRowsUpdated,
 	}
 }
 

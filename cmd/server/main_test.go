@@ -515,6 +515,149 @@ func TestSyncActionHandlersValidateRequest(t *testing.T) {
 	}
 }
 
+func TestReconcileAPIHandlers(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "reconcile.sqlite")
+	setupSQLiteFixture(t, dbPath, `
+CREATE TABLE sync_runs (
+  id INTEGER PRIMARY KEY,
+  mode TEXT NOT NULL,
+  status TEXT NOT NULL,
+  started_at TEXT NOT NULL,
+  finished_at TEXT,
+  discovered_count INTEGER NOT NULL DEFAULT 0,
+  imported_count INTEGER NOT NULL DEFAULT 0,
+  failed_count INTEGER NOT NULL DEFAULT 0,
+  skipped_count INTEGER NOT NULL DEFAULT 0,
+  summary TEXT
+);
+CREATE TABLE tournaments (
+  id INTEGER PRIMARY KEY,
+  braacket_id TEXT NOT NULL UNIQUE,
+  url TEXT NOT NULL,
+  league_slug TEXT NOT NULL,
+  name TEXT,
+  date_text TEXT,
+  tournament_date TEXT,
+  queue_state TEXT NOT NULL,
+  first_seen_at TEXT NOT NULL,
+  last_seen_at TEXT NOT NULL,
+  last_attempted_at TEXT,
+  last_imported_at TEXT,
+  first_seen_run_id INTEGER,
+  retry_count INTEGER NOT NULL DEFAULT 0,
+  last_error_class TEXT,
+  last_error_message TEXT,
+  next_retry_at TEXT,
+  current_attempt_id INTEGER
+);
+CREATE TABLE tournament_import_attempts (
+  id INTEGER PRIMARY KEY,
+  tournament_id INTEGER NOT NULL,
+  run_id INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  started_at TEXT NOT NULL,
+  finished_at TEXT,
+  error_class TEXT,
+  error_message TEXT,
+  retry_count INTEGER NOT NULL DEFAULT 0,
+  request_count INTEGER NOT NULL DEFAULT 0,
+  pages_fetched INTEGER NOT NULL DEFAULT 0,
+  http_statuses TEXT,
+  duration_ms INTEGER,
+  retryable INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE players (
+  id INTEGER PRIMARY KEY,
+  canonical_name TEXT NOT NULL UNIQUE,
+  braacket_league_player_id TEXT,
+  braacket_player_id TEXT,
+  name TEXT NOT NULL,
+  first_seen_at TEXT NOT NULL,
+  last_seen_at TEXT NOT NULL
+);
+CREATE TABLE tournament_players (
+  id INTEGER PRIMARY KEY,
+  tournament_id INTEGER NOT NULL,
+  attempt_id INTEGER NOT NULL,
+  canonical_player_id INTEGER,
+  braacket_player_id TEXT,
+  braacket_league_player_id TEXT,
+  name TEXT NOT NULL
+);
+CREATE TABLE player_identity_aliases (
+  id INTEGER PRIMARY KEY,
+  alias_type TEXT NOT NULL,
+  alias_value TEXT NOT NULL UNIQUE,
+  canonical_player_id INTEGER NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE matches (
+  id INTEGER PRIMARY KEY,
+  tournament_id INTEGER NOT NULL,
+  attempt_id INTEGER NOT NULL,
+  match_key TEXT NOT NULL,
+  player1_tournament_player_id INTEGER,
+  player2_tournament_player_id INTEGER,
+  winner_tournament_player_id INTEGER,
+  player1_name TEXT,
+  player2_name TEXT,
+  winner_name TEXT
+);
+INSERT INTO sync_runs (id, mode, status, started_at) VALUES (1, 'seed', 'succeeded', '2026-01-01T00:00:00Z');
+INSERT INTO tournaments (id, braacket_id, url, league_slug, name, queue_state, first_seen_at, last_seen_at, retry_count)
+VALUES (1, 't1', 'https://braacket.com/tournament/t1', 'test', 'T1', 'imported', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 0);
+INSERT INTO tournament_import_attempts (id, tournament_id, run_id, status, started_at)
+VALUES (1, 1, 1, 'succeeded', '2026-01-01T00:00:00Z');
+INSERT INTO players (id, canonical_name, braacket_league_player_id, name, first_seen_at, last_seen_at)
+VALUES
+  (1, 'league:l1', 'l1', 'Soda cup', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
+  (2, 'league:l2', 'l2', 'Soda cup', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
+  (3, 'league:l3', 'l3', 'Dial M', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
+  (4, 'name:dial m', NULL, 'Dial M', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+INSERT INTO tournament_players (id, tournament_id, attempt_id, canonical_player_id, braacket_league_player_id, name)
+VALUES
+  (10, 1, 1, 2, 'l2', 'Soda cup'),
+  (11, 1, 1, 4, NULL, 'Dial M');
+INSERT INTO matches (id, tournament_id, attempt_id, match_key, player1_tournament_player_id, player2_tournament_player_id, winner_tournament_player_id, player1_name, player2_name, winner_name)
+VALUES
+  (101, 1, 1, 'm1', 10, 11, 10, 'Soda cup', 'Dial M', 'Soda cup');
+`)
+
+	server := &app{dbPath: dbPath}
+
+	reportRecorder := httptest.NewRecorder()
+	server.handleReconcileReport(reportRecorder, httptest.NewRequest(http.MethodGet, "/api/reconcile/report?limit=10", nil))
+	if reportRecorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", reportRecorder.Code, reportRecorder.Body.String())
+	}
+	reportBody := reportRecorder.Body.String()
+	if !strings.Contains(reportBody, `"normalizedName": "soda cup"`) || !strings.Contains(reportBody, `"normalizedName": "dial m"`) {
+		t.Fatalf("expected both reconcile groups in report: %s", reportBody)
+	}
+
+	mixedRequest := httptest.NewRequest(http.MethodPost, "/api/reconcile/fix-mixed-name-only", strings.NewReader(`{"name":"Dial M"}`))
+	mixedRequest.Header.Set("Content-Type", "application/json")
+	mixedRecorder := httptest.NewRecorder()
+	server.handleReconcileFixMixedNameOnly(mixedRecorder, mixedRequest)
+	if mixedRecorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", mixedRecorder.Code, mixedRecorder.Body.String())
+	}
+	if !strings.Contains(mixedRecorder.Body.String(), `"targetCanonicalPlayerID": 3`) {
+		t.Fatalf("expected target id 3 in mixed repair: %s", mixedRecorder.Body.String())
+	}
+
+	multipleRequest := httptest.NewRequest(http.MethodPost, "/api/reconcile/fix-multiple-league-ids", strings.NewReader(`{"name":"Soda cup","keepLeagueId":"l1"}`))
+	multipleRequest.Header.Set("Content-Type", "application/json")
+	multipleRecorder := httptest.NewRecorder()
+	server.handleReconcileFixMultipleLeagueIDs(multipleRecorder, multipleRequest)
+	if multipleRecorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", multipleRecorder.Code, multipleRecorder.Body.String())
+	}
+	if !strings.Contains(multipleRecorder.Body.String(), `"aliasValuesCreated": [`) || !strings.Contains(multipleRecorder.Body.String(), `"l2"`) {
+		t.Fatalf("expected l2 alias in multiple repair: %s", multipleRecorder.Body.String())
+	}
+}
+
 func TestPaginatePlayersCompactsByDefault(t *testing.T) {
 	players := []map[string]interface{}{
 		{
