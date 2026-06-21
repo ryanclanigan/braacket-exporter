@@ -187,9 +187,9 @@ Example scoped to one tournament family:
 bun run cli rank colley --start-date 2026-01-01 --end-date 2026-06-30 --min-tournaments 3 --tournament-name-like "Wednesday" --export ./exports/h1-2026-wednesdays.json
 ```
 
-### `bun run cli reconcile identities [--limit <n>]`
+### `bun run reconcile-go -- identities [--limit <n>]`
 
-Builds a read-only report of likely player identity splits in the local SQLite database.
+Builds a read-only report of likely player identity splits in the local SQLite database through the native Go reconcile service.
 
 It reports two categories:
 - same normalized display name with multiple non-null Braacket league player IDs
@@ -211,10 +211,11 @@ Arguments:
 Example:
 
 ```bash
-bun run cli reconcile identities --limit 20
+bun run reconcile-go -- identities --limit 20
+go run ./cmd/reconcile identities --limit 20
 ```
 
-### `bun run cli reconcile fix-mixed-name-only --name <display-name>`
+### `bun run reconcile-go -- fix-mixed-name-only --name <display-name>`
 
 Repairs the "one league-backed row plus one or more name-only fallback rows" case for a single display name.
 
@@ -232,10 +233,11 @@ What it does:
 Example:
 
 ```bash
-bun run cli reconcile fix-mixed-name-only --name "Dial M"
+bun run reconcile-go -- fix-mixed-name-only --name "Dial M"
+go run ./cmd/reconcile fix-mixed-name-only --name "Dial M"
 ```
 
-### `bun run cli reconcile fix-multiple-league-ids --name <display-name> --keep-league-id <id>`
+### `bun run reconcile-go -- fix-multiple-league-ids --name <display-name> --keep-league-id <id>`
 
 Repairs the "same display name with multiple Braacket league player IDs" case for a single display name.
 
@@ -253,8 +255,13 @@ What it does:
 Example:
 
 ```bash
-bun run cli reconcile fix-multiple-league-ids --name "Soda cup" --keep-league-id 2AB93591-2B06-45C2-8DD1-A4660093B913
+bun run reconcile-go -- fix-multiple-league-ids --name "Soda cup" --keep-league-id 2AB93591-2B06-45C2-8DD1-A4660093B913
+go run ./cmd/reconcile fix-multiple-league-ids --name "Soda cup" --keep-league-id 2AB93591-2B06-45C2-8DD1-A4660093B913
 ```
+
+Legacy note:
+- the Bun `bun run cli reconcile ...` commands still exist, but the Go CLI and Go admin UI are now the canonical reconcile paths
+- prefer the Go path for new operational workflows
 
 ## Operational Notes
 

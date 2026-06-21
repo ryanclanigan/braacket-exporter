@@ -27,21 +27,23 @@ The first pass in this repo uses a Go HTTP server because:
 
 ## Transitional State
 
-The current repository already has working pieces we should preserve short term:
+The current repository still has a few transitional pieces we preserve short term:
 
-- Braacket ingestion and identity repair in Bun
+- Braacket ingestion helpers and some legacy scripts in Bun
 - Elo and TrueSkill are not implemented yet
 - SQLite as the durable local store
 
-The new Go server now owns the live read/query path and native Colley ranking, while discovery/import
-and identity repair still live in Bun during the transition.
+The Go runtime now owns the live read/query path, native Colley ranking, sync diagnostics/admin flows,
+and identity repair. Discovery/import is also run through Go for the canonical path, while some legacy Bun
+entrypoints remain available during the transition.
 
 That means:
 
 - `GET /api/rankings?system=colley` is live and computed natively in Go
 - `GET /api/rankings?system=elo|trueskill` is intentionally marked as planned
 - overview and player search run through in-process SQLite queries from Go
-- discovery/import/reconcile are still Bun-driven
+- sync diagnostics, source-page inspection, region admin, and identity repair are live in Go
+- `go run ./cmd/sync ...` and `go run ./cmd/reconcile ...` are the canonical operational CLIs
 
 This is a deliberate bridge, not the target end state.
 

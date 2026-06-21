@@ -7,6 +7,7 @@
     "cli": "bun run src/cli.ts",
     "server": "PATH=/usr/local/go/bin:$PATH go run ./cmd/server",
     "discover-go": "PATH=/usr/local/go/bin:$PATH go run cmd/sync/main.go discover",
+    "reconcile-go": "PATH=/usr/local/go/bin:$PATH go run ./cmd/reconcile",
     "comelee": "zsh scripts/comelee-sync.sh",
     "test:go": "PATH=/usr/local/go/bin:$PATH go test ./...",
     "test:bun": "bun test ./test",
