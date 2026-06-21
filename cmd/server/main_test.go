@@ -282,6 +282,20 @@ CREATE TABLE tournament_import_attempts (
   duration_ms INTEGER,
   retryable INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE source_pages (
+  id INTEGER PRIMARY KEY,
+  run_id INTEGER NOT NULL,
+  tournament_id INTEGER,
+  attempt_id INTEGER,
+  url TEXT NOT NULL,
+  page_type TEXT NOT NULL,
+  http_status INTEGER,
+  content_hash TEXT,
+  fetched_at TEXT NOT NULL,
+  anti_bot_class TEXT,
+  error_message TEXT,
+  html TEXT
+);
 CREATE TABLE players (
   id INTEGER PRIMARY KEY,
   canonical_name TEXT,
@@ -326,9 +340,21 @@ INSERT INTO tournament_players (id, tournament_id, attempt_id, canonical_player_
 VALUES
   (100, 10, 1, 1, 'Alice'),
   (101, 10, 1, 2, 'Bob');
+INSERT INTO tournament_import_attempts (
+  id, tournament_id, run_id, status, started_at, finished_at, error_class, error_message,
+  retry_count, request_count, pages_fetched, http_statuses, duration_ms, retryable
+)
+VALUES
+  (31, 11, 2, 'failed_retryable', '2026-06-20T00:11:00Z', '2026-06-20T00:12:00Z', 'rate_limit', 'HTTP 429',
+   2, 3, 2, '[429,429,200]', 1500, 1);
 INSERT INTO matches (id, tournament_id, attempt_id, match_key)
 VALUES
   (200, 10, 1, 'm1');
+INSERT INTO source_pages (
+  id, run_id, tournament_id, attempt_id, url, page_type, http_status, content_hash, fetched_at, anti_bot_class, error_message, html
+)
+VALUES
+  (41, 2, 11, 31, 'https://braacket.com/tournament/BBB', 'players', 429, 'abc123', '2026-06-20T00:11:30Z', 'rate_limit', 'HTTP 429', '<html></html>');
 `)
 
 	server := &app{dbPath: dbPath}
@@ -371,6 +397,22 @@ VALUES
 	}
 	if strings.Contains(body, `"braacketId": "AAA"`) {
 		t.Fatalf("expected state+search filter to exclude AAA: %s", body)
+	}
+
+	detailRecorder := httptest.NewRecorder()
+	server.handleSyncTournamentDetail(detailRecorder, httptest.NewRequest(http.MethodGet, "/api/sync/tournament?braacketId=BBB", nil))
+	if detailRecorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", detailRecorder.Code, detailRecorder.Body.String())
+	}
+	detailBody := detailRecorder.Body.String()
+	if !strings.Contains(detailBody, `"httpStatuses": "[429,429,200]"`) {
+		t.Fatalf("expected attempt http statuses in tournament detail: %s", detailBody)
+	}
+	if !strings.Contains(detailBody, `"pageType": "players"`) {
+		t.Fatalf("expected source page details in tournament detail: %s", detailBody)
+	}
+	if !strings.Contains(detailBody, `"antiBotClass": "rate_limit"`) {
+		t.Fatalf("expected anti-bot class in tournament detail: %s", detailBody)
 	}
 }
 

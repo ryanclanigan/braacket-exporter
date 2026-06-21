@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log"
@@ -121,6 +122,36 @@ type syncTournamentResponse struct {
 	MatchCount       int    `json:"matchCount"`
 }
 
+type syncAttemptResponse struct {
+	ID           int    `json:"id"`
+	RunID        int    `json:"runId"`
+	Status       string `json:"status"`
+	StartedAt    string `json:"startedAt"`
+	FinishedAt   string `json:"finishedAt,omitempty"`
+	ErrorClass   string `json:"errorClass,omitempty"`
+	ErrorMessage string `json:"errorMessage,omitempty"`
+	RetryCount   int    `json:"retryCount"`
+	RequestCount int    `json:"requestCount"`
+	PagesFetched int    `json:"pagesFetched"`
+	HTTPStatuses string `json:"httpStatuses,omitempty"`
+	DurationMS   int    `json:"durationMs"`
+	Retryable    bool   `json:"retryable"`
+}
+
+type syncSourcePageResponse struct {
+	ID           int    `json:"id"`
+	RunID        int    `json:"runId"`
+	TournamentID int    `json:"tournamentId"`
+	AttemptID    int    `json:"attemptId,omitempty"`
+	URL          string `json:"url"`
+	PageType     string `json:"pageType"`
+	HTTPStatus   int    `json:"httpStatus,omitempty"`
+	ContentHash  string `json:"contentHash,omitempty"`
+	FetchedAt    string `json:"fetchedAt"`
+	AntiBotClass string `json:"antiBotClass,omitempty"`
+	ErrorMessage string `json:"errorMessage,omitempty"`
+}
+
 type rankingCache struct {
 	mu    sync.RWMutex
 	items map[string]cachedRankingResult
@@ -158,6 +189,7 @@ func main() {
 	mux.HandleFunc("/api/sync/summary", server.handleSyncSummary)
 	mux.HandleFunc("/api/sync/runs", server.handleSyncRuns)
 	mux.HandleFunc("/api/sync/tournaments", server.handleSyncTournaments)
+	mux.HandleFunc("/api/sync/tournament", server.handleSyncTournamentDetail)
 	mux.HandleFunc("/api/sync/requeue", server.handleSyncRequeue)
 	mux.HandleFunc("/api/sync/reset", server.handleSyncReset)
 	mux.HandleFunc("/api/sync/import", server.handleSyncImport)
@@ -630,6 +662,102 @@ func (a *app) handleSyncTournaments(w http.ResponseWriter, r *http.Request) {
 		"state":       state,
 		"search":      search,
 		"tournaments": response,
+	})
+}
+
+func (a *app) handleSyncTournamentDetail(w http.ResponseWriter, r *http.Request) {
+	repo, err := openSyncRepo(a.dbPath)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	defer repo.Close()
+
+	braacketID := strings.TrimSpace(r.URL.Query().Get("braacketId"))
+	if braacketID == "" {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("missing braacketId"))
+		return
+	}
+
+	tournament, err := repo.GetTournamentSummaryByBraacketID(braacketID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusNotFound, err)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	attempts, err := repo.ListTournamentAttempts(tournament.ID, 10)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	sourcePages, err := repo.ListTournamentSourcePages(tournament.ID, 20)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	attemptResponse := make([]syncAttemptResponse, 0, len(attempts))
+	for _, item := range attempts {
+		attemptResponse = append(attemptResponse, syncAttemptResponse{
+			ID:           item.ID,
+			RunID:        item.RunID,
+			Status:       item.Status,
+			StartedAt:    item.StartedAt,
+			FinishedAt:   item.FinishedAt,
+			ErrorClass:   item.ErrorClass,
+			ErrorMessage: item.ErrorMessage,
+			RetryCount:   item.RetryCount,
+			RequestCount: item.RequestCount,
+			PagesFetched: item.PagesFetched,
+			HTTPStatuses: item.HTTPStatuses,
+			DurationMS:   item.DurationMS,
+			Retryable:    item.Retryable,
+		})
+	}
+
+	sourcePageResponse := make([]syncSourcePageResponse, 0, len(sourcePages))
+	for _, item := range sourcePages {
+		sourcePageResponse = append(sourcePageResponse, syncSourcePageResponse{
+			ID:           item.ID,
+			RunID:        item.RunID,
+			TournamentID: item.TournamentID,
+			AttemptID:    item.AttemptID,
+			URL:          item.URL,
+			PageType:     item.PageType,
+			HTTPStatus:   item.HTTPStatus,
+			ContentHash:  item.ContentHash,
+			FetchedAt:    item.FetchedAt,
+			AntiBotClass: item.AntiBotClass,
+			ErrorMessage: item.ErrorMessage,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"tournament": syncTournamentResponse{
+			ID:               tournament.ID,
+			BraacketID:       tournament.BraacketID,
+			URL:              tournament.URL,
+			LeagueSlug:       tournament.LeagueSlug,
+			Name:             tournament.Name,
+			DateText:         tournament.DateText,
+			TournamentDate:   tournament.TournamentDate,
+			QueueState:       tournament.QueueState,
+			RetryCount:       tournament.RetryCount,
+			NextRetryAt:      tournament.NextRetryAt,
+			LastAttemptedAt:  tournament.LastAttemptedAt,
+			LastImportedAt:   tournament.LastImportedAt,
+			LastErrorClass:   tournament.LastErrorClass,
+			LastErrorMessage: tournament.LastErrorMessage,
+			CurrentAttemptID: tournament.CurrentAttemptID,
+			PlayerCount:      tournament.PlayerCount,
+			MatchCount:       tournament.MatchCount,
+		},
+		"attempts":    attemptResponse,
+		"sourcePages": sourcePageResponse,
 	})
 }
 

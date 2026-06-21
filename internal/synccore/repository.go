@@ -77,6 +77,36 @@ type SyncTournamentSummary struct {
 	MatchCount       int
 }
 
+type TournamentAttemptSummary struct {
+	ID           int
+	RunID        int
+	Status       string
+	StartedAt    string
+	FinishedAt   string
+	ErrorClass   string
+	ErrorMessage string
+	RetryCount   int
+	RequestCount int
+	PagesFetched int
+	HTTPStatuses string
+	DurationMS   int
+	Retryable    bool
+}
+
+type SourcePageSummary struct {
+	ID           int
+	RunID        int
+	TournamentID int
+	AttemptID    int
+	URL          string
+	PageType     string
+	HTTPStatus   int
+	ContentHash  string
+	FetchedAt    string
+	AntiBotClass string
+	ErrorMessage string
+}
+
 func Open(dbPath string, leagueSlug string) (*Repository, error) {
 	dir := filepath.Dir(dbPath)
 	if dir != "." && dir != "" {
@@ -291,6 +321,130 @@ func (r *Repository) ListTournamentSummaries(queueState string, search string, l
 			&item.CurrentAttemptID,
 			&item.PlayerCount,
 			&item.MatchCount,
+		); err != nil {
+			return nil, err
+		}
+		results = append(results, item)
+	}
+	return results, rows.Err()
+}
+
+func (r *Repository) GetTournamentSummaryByBraacketID(braacketID string) (*SyncTournamentSummary, error) {
+	rows, err := r.ListTournamentSummaries("", braacketID, 200)
+	if err != nil {
+		return nil, err
+	}
+	for _, item := range rows {
+		if item.BraacketID == braacketID {
+			copy := item
+			return &copy, nil
+		}
+	}
+	return nil, sql.ErrNoRows
+}
+
+func (r *Repository) ListTournamentAttempts(tournamentID int, limit int) ([]TournamentAttemptSummary, error) {
+	if limit < 1 || limit > 100 {
+		limit = 10
+	}
+	rows, err := r.db.Query(
+		`SELECT
+      id,
+      run_id,
+      status,
+      started_at,
+      COALESCE(finished_at, ''),
+      COALESCE(error_class, ''),
+      COALESCE(error_message, ''),
+      retry_count,
+      request_count,
+      pages_fetched,
+      COALESCE(http_statuses, ''),
+      COALESCE(duration_ms, 0),
+      retryable
+     FROM tournament_import_attempts
+     WHERE tournament_id = ?
+     ORDER BY id DESC
+     LIMIT ?`,
+		tournamentID,
+		limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	results := []TournamentAttemptSummary{}
+	for rows.Next() {
+		var item TournamentAttemptSummary
+		var retryable int
+		if err := rows.Scan(
+			&item.ID,
+			&item.RunID,
+			&item.Status,
+			&item.StartedAt,
+			&item.FinishedAt,
+			&item.ErrorClass,
+			&item.ErrorMessage,
+			&item.RetryCount,
+			&item.RequestCount,
+			&item.PagesFetched,
+			&item.HTTPStatuses,
+			&item.DurationMS,
+			&retryable,
+		); err != nil {
+			return nil, err
+		}
+		item.Retryable = retryable != 0
+		results = append(results, item)
+	}
+	return results, rows.Err()
+}
+
+func (r *Repository) ListTournamentSourcePages(tournamentID int, limit int) ([]SourcePageSummary, error) {
+	if limit < 1 || limit > 200 {
+		limit = 20
+	}
+	rows, err := r.db.Query(
+		`SELECT
+      id,
+      run_id,
+      COALESCE(tournament_id, 0),
+      COALESCE(attempt_id, 0),
+      url,
+      page_type,
+      COALESCE(http_status, 0),
+      COALESCE(content_hash, ''),
+      fetched_at,
+      COALESCE(anti_bot_class, ''),
+      COALESCE(error_message, '')
+     FROM source_pages
+     WHERE tournament_id = ?
+     ORDER BY id DESC
+     LIMIT ?`,
+		tournamentID,
+		limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	results := []SourcePageSummary{}
+	for rows.Next() {
+		var item SourcePageSummary
+		if err := rows.Scan(
+			&item.ID,
+			&item.RunID,
+			&item.TournamentID,
+			&item.AttemptID,
+			&item.URL,
+			&item.PageType,
+			&item.HTTPStatus,
+			&item.ContentHash,
+			&item.FetchedAt,
+			&item.AntiBotClass,
+			&item.ErrorMessage,
 		); err != nil {
 			return nil, err
 		}
