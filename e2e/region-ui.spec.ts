@@ -73,6 +73,20 @@ CREATE TABLE tournament_import_attempts (
   duration_ms INTEGER,
   retryable INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE source_pages (
+  id INTEGER PRIMARY KEY,
+  run_id INTEGER NOT NULL,
+  tournament_id INTEGER,
+  attempt_id INTEGER,
+  url TEXT NOT NULL,
+  page_type TEXT NOT NULL,
+  http_status INTEGER,
+  content_hash TEXT,
+  fetched_at TEXT NOT NULL,
+  anti_bot_class TEXT,
+  error_message TEXT,
+  html TEXT
+);
 CREATE TABLE players (
   id INTEGER PRIMARY KEY,
   canonical_name TEXT,
@@ -111,6 +125,13 @@ INSERT INTO tournaments (
   (2, 'T-RETRY', 'https://braacket.com/tournament/T-RETRY', 'comelee', 'Arcadian Pools', 'June 11', '2026-06-11', 'failed_retryable',
    '2026-06-11T00:00:00Z', '2026-06-20T00:11:00Z', '2026-06-20T00:11:00Z', NULL, 2,
    2, 'rate_limit', 'HTTP 429', '2026-06-20T06:00:00Z', NULL);
+INSERT INTO tournament_import_attempts (
+  id, tournament_id, run_id, status, started_at, finished_at, error_class, error_message,
+  retry_count, request_count, pages_fetched, http_statuses, duration_ms, retryable
+)
+VALUES
+  (31, 2, 2, 'failed_retryable', '2026-06-20T00:11:00Z', '2026-06-20T00:12:00Z', 'rate_limit', 'HTTP 429',
+   2, 3, 2, '[429,429,200]', 1500, 1);
 INSERT INTO players (
   id, canonical_name, braacket_league_player_id, braacket_player_id, name, first_seen_at, last_seen_at
 ) VALUES
@@ -120,6 +141,11 @@ INSERT INTO tournament_players (id, tournament_id, attempt_id, canonical_player_
 VALUES (11, 1, 1, 363), (12, 1, 1, 2);
 INSERT INTO matches (id, tournament_id, attempt_id, match_key, player1_tournament_player_id, player2_tournament_player_id)
 VALUES (101, 1, 1, 'm1', 11, 12);
+INSERT INTO source_pages (
+  id, run_id, tournament_id, attempt_id, url, page_type, http_status, content_hash, fetched_at, anti_bot_class, error_message, html
+)
+VALUES
+  (41, 2, 2, 31, 'https://braacket.com/tournament/T-RETRY/player?page=1', 'players', 429, 'abc123', '2026-06-20T00:11:30Z', 'rate_limit', 'HTTP 429', '<html></html>');
 `]);
 }
 
@@ -240,6 +266,13 @@ test("sync diagnostics UI shows queue state and recent tournament failures", asy
   await expect(tournamentRows).toContainText("Rate Limit");
 
   const firstRow = tournamentRows.locator("tr").first();
+  await firstRow.locator('button[data-sync-detail="T-RETRY"]').click();
+  await expect(page.locator("#sync-detail-meta")).toContainText("Arcadian Pools");
+  await expect(page.locator("#sync-attempt-list")).toContainText("Attempt #31");
+  await expect(page.locator("#sync-attempt-list")).toContainText("[429,429,200]");
+  await expect(page.locator("#sync-source-page-list")).toContainText("players");
+  await expect(page.locator("#sync-source-page-list")).toContainText("HTTP 429");
+
   await firstRow.locator('button[data-sync-action="requeue"]').click();
   await expect(page.locator("#sync-action-feedback")).toContainText("Requeued T-RETRY.");
 
