@@ -272,6 +272,10 @@ test("sync diagnostics UI shows queue state and recent tournament failures", asy
   await expect(page.locator("#sync-attempt-list")).toContainText("[429,429,200]");
   await expect(page.locator("#sync-source-page-list")).toContainText("players");
   await expect(page.locator("#sync-source-page-list")).toContainText("HTTP 429");
+  await page.locator('button[data-source-page-id="41"]').click();
+  await expect(page.locator("#sync-source-preview-meta")).toContainText("Players");
+  await expect(page.locator("#sync-source-preview-code")).toContainText("<html></html>");
+  await expect(page.locator("#sync-source-link")).toHaveAttribute("href", /T-RETRY\/player\?page=1/);
 
   await firstRow.locator('button[data-sync-action="requeue"]').click();
   await expect(page.locator("#sync-action-feedback")).toContainText("Requeued T-RETRY.");
