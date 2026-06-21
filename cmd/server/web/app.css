@@ -212,6 +212,19 @@ button {
   gap: 18px;
 }
 
+.identity-grid {
+  margin-top: 18px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+
+.identity-column {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
+
 .sync-column {
   display: grid;
   gap: 14px;
@@ -276,6 +289,20 @@ button {
   justify-content: space-between;
   gap: 12px;
   align-items: center;
+}
+
+.identity-player-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: start;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.identity-player-row:first-of-type {
+  border-top: 0;
+  padding-top: 0;
 }
 
 .preview-link {
@@ -451,6 +478,10 @@ th {
   }
 
   .sync-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .identity-grid {
     grid-template-columns: 1fr;
   }
 }

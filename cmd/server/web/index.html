@@ -19,6 +19,7 @@
         <nav class="sidebar-nav">
           <a href="#overview">Overview</a>
           <a href="#sync">Sync</a>
+          <a href="#identity">Identity</a>
           <a href="#rankings">Rankings</a>
           <a href="#players">Players</a>
           <a href="#regions">Regions</a>
@@ -216,6 +217,35 @@
           </form>
 
           <div id="player-results" class="player-list"></div>
+        </section>
+
+        <section id="identity" class="panel">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Identity Admin</p>
+              <h3>Reconcile</h3>
+            </div>
+            <button id="refresh-reconcile" class="button-secondary">Refresh</button>
+          </div>
+
+          <div id="reconcile-feedback" class="callout muted">Review likely canonical-player splits before applying any merge repair.</div>
+          <div class="identity-grid">
+            <div class="identity-column">
+              <div class="subsection-header">
+                <strong>Multiple League IDs</strong>
+                <span class="muted">Same visible name, multiple Braacket league IDs.</span>
+              </div>
+              <div id="reconcile-multiple-groups" class="detail-list"></div>
+            </div>
+
+            <div class="identity-column">
+              <div class="subsection-header">
+                <strong>Mixed League + Name-Only</strong>
+                <span class="muted">One league-backed player plus one or more fallback name-only rows.</span>
+              </div>
+              <div id="reconcile-mixed-groups" class="detail-list"></div>
+            </div>
+          </div>
         </section>
 
         <section id="regions" class="panel">

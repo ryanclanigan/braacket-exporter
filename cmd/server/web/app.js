@@ -10,6 +10,9 @@ const syncSourcePageList = document.querySelector("#sync-source-page-list");
 const syncSourceLink = document.querySelector("#sync-source-link");
 const syncSourcePreviewMeta = document.querySelector("#sync-source-preview-meta");
 const syncSourcePreviewCode = document.querySelector("#sync-source-preview-code");
+const reconcileFeedback = document.querySelector("#reconcile-feedback");
+const reconcileMultipleGroups = document.querySelector("#reconcile-multiple-groups");
+const reconcileMixedGroups = document.querySelector("#reconcile-mixed-groups");
 const rankingMeta = document.querySelector("#ranking-meta");
 const rankingRows = document.querySelector("#ranking-rows");
 const playerResults = document.querySelector("#player-results");
@@ -23,6 +26,7 @@ const regionSearchForm = document.querySelector("#region-search-form");
 const regionAssignForm = document.querySelector("#region-assign-form");
 const refreshOverviewButton = document.querySelector("#refresh-overview");
 const refreshSyncButton = document.querySelector("#refresh-sync");
+const refreshReconcileButton = document.querySelector("#refresh-reconcile");
 const previousPageButton = document.querySelector("#previous-page");
 const nextPageButton = document.querySelector("#next-page");
 const rankingPageMeta = document.querySelector("#ranking-page-meta");
@@ -261,6 +265,63 @@ function renderSyncTournamentDetail(data) {
   resetSourcePreview();
 }
 
+function renderReconcileReport(data) {
+  renderReconcileGroups(
+    reconcileMultipleGroups,
+    Array.isArray(data.multipleLeagueIds) ? data.multipleLeagueIds : [],
+    "multiple"
+  );
+  renderReconcileGroups(
+    reconcileMixedGroups,
+    Array.isArray(data.mixedLeagueAndNameOnly) ? data.mixedLeagueAndNameOnly : [],
+    "mixed"
+  );
+}
+
+function renderReconcileGroups(container, groups, kind) {
+  container.innerHTML = groups.length
+    ? groups
+        .map((group) => {
+          const displayName = group.players?.[0]?.name || group.normalizedName;
+          return `
+            <article class="detail-card">
+              <div class="detail-card-header">
+                <strong>${escapeHTML(displayName)}</strong>
+                <span class="muted">${escapeHTML(group.normalizedName)}</span>
+              </div>
+              <div class="detail-list">
+                ${(Array.isArray(group.players) ? group.players : [])
+                  .map(
+                    (player) => `
+                      <div class="identity-player-row">
+                        <div>
+                          <strong>${escapeHTML(player.name)}</strong>
+                          <div class="muted">canonical ${player.canonicalPlayerId} • ${escapeHTML(player.canonicalName)}</div>
+                          <div class="muted">${player.braacketLeaguePlayerId ? `league ${escapeHTML(player.braacketLeaguePlayerId)}` : "name-only fallback row"}</div>
+                          <div class="muted">${player.tournaments} tournaments • ${player.matches} matches</div>
+                        </div>
+                        ${
+                          kind === "multiple" && player.braacketLeaguePlayerId
+                            ? `<button class="button-secondary" type="button" data-reconcile-action="fix-multiple-league-ids" data-name="${escapeHTML(displayName)}" data-keep-league-id="${escapeHTML(player.braacketLeaguePlayerId)}">Keep This ID</button>`
+                            : ""
+                        }
+                      </div>
+                    `
+                  )
+                  .join("")}
+              </div>
+              ${
+                kind === "mixed"
+                  ? `<button class="button-primary" type="button" data-reconcile-action="fix-mixed-name-only" data-name="${escapeHTML(displayName)}">Merge Name-Only Rows</button>`
+                  : ""
+              }
+            </article>
+          `;
+        })
+        .join("")
+    : `<div class="muted">No groups found.</div>`;
+}
+
 function renderRankingResponse(data) {
   if (data.status !== "ready") {
     rankingMeta.innerHTML = `<div class="warning">${data.message || "Ranking system not available."}</div>`;
@@ -417,6 +478,17 @@ async function loadSyncDiagnostics() {
   }
 }
 
+async function loadReconcileReport() {
+  reconcileMultipleGroups.innerHTML = `<div class="muted">Loading reconcile report...</div>`;
+  reconcileMixedGroups.innerHTML = `<div class="muted">Loading reconcile report...</div>`;
+  const response = await fetch("/api/reconcile/report?limit=50");
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.error || "Failed to load reconcile report");
+  }
+  renderReconcileReport(data);
+}
+
 async function loadSyncTournamentDetail(braacketId) {
   syncState.selectedBraacketId = braacketId;
   syncState.selectedSourcePageId = 0;
@@ -456,6 +528,19 @@ async function runSyncAction(action, payload) {
   const data = await response.json();
   if (!response.ok) {
     throw new Error(data.error || `Failed to ${action} tournament`);
+  }
+  return data;
+}
+
+async function runReconcileAction(action, payload) {
+  const response = await fetch(`/api/reconcile/${action}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.error || `Failed to run ${action}`);
   }
   return data;
 }
@@ -593,6 +678,12 @@ refreshSyncButton.addEventListener("click", () => {
   void loadSyncDiagnostics();
 });
 
+refreshReconcileButton.addEventListener("click", () => {
+  void loadReconcileReport().catch((error) => {
+    reconcileFeedback.textContent = error instanceof Error ? error.message : String(error);
+  });
+});
+
 syncTournamentRows.addEventListener("click", (event) => {
   const detailButton = event.target.closest("button[data-sync-detail]");
   if (detailButton) {
@@ -661,6 +752,44 @@ syncSourcePageList.addEventListener("click", (event) => {
   });
 });
 
+document.querySelector("#identity").addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-reconcile-action]");
+  if (!button) {
+    return;
+  }
+  const action = button.dataset.reconcileAction;
+  const name = button.dataset.name;
+  if (!action || !name) {
+    return;
+  }
+
+  const payload =
+    action === "fix-multiple-league-ids"
+      ? { name, keepLeagueId: button.dataset.keepLeagueId || "" }
+      : { name };
+  const confirmMessage =
+    action === "fix-multiple-league-ids"
+      ? `Keep ${payload.keepLeagueId} for ${name} and merge the other same-name league IDs?`
+      : `Merge name-only fallback rows into the league-backed canonical player for ${name}?`;
+  if (!window.confirm(confirmMessage)) {
+    return;
+  }
+
+  reconcileFeedback.textContent = `Running ${humanizeState(action)} for ${name}...`;
+  void (async () => {
+    try {
+      const data = await runReconcileAction(action, payload);
+      reconcileFeedback.textContent =
+        `Updated ${data.result.normalizedName}: target ${data.result.targetCanonicalPlayerID}, merged ${data.result.mergedCanonicalPlayerIDs.join(", ") || "none"}.`;
+      await loadReconcileReport();
+      await loadPlayers();
+      await loadRegionSearch();
+    } catch (error) {
+      reconcileFeedback.textContent = error instanceof Error ? error.message : String(error);
+    }
+  })();
+});
+
 previousPageButton.addEventListener("click", () => {
   rankingState.offset = Math.max(0, rankingState.offset - rankingState.limit);
   void loadRankings();
@@ -706,6 +835,7 @@ function resetSourcePreview() {
 setDefaultFilters();
 void loadOverview();
 void loadSyncDiagnostics();
+void loadReconcileReport();
 void loadRankings();
 void loadPlayers();
 void loadRegionSearch();
