@@ -10,11 +10,11 @@ import (
 )
 
 type Service struct {
-	repo            *Repository
-	discovery       *DiscoveryService
-	session         *BrowserSession
-	listingURL      string
-	retryPolicy     RetryPolicy
+	repo                 *Repository
+	discovery            *DiscoveryService
+	session              *BrowserSession
+	listingURL           string
+	retryPolicy          RetryPolicy
 	maxTournamentRetries int
 }
 
@@ -40,11 +40,11 @@ func NewService(repo *Repository, session *BrowserSession, config SyncConfig) *S
 		maxTournamentRetries = config.RetryPolicy.MaxTournamentRetries
 	}
 	return &Service{
-		repo:            repo,
-		discovery:       NewDiscoveryService(repo, session.client, discoveryConfig),
-		session:         session,
-		listingURL:      config.ListingURL,
-		retryPolicy:     config.RetryPolicy,
+		repo:                 repo,
+		discovery:            NewDiscoveryService(repo, session.client, discoveryConfig),
+		session:              session,
+		listingURL:           config.ListingURL,
+		retryPolicy:          config.RetryPolicy,
 		maxTournamentRetries: maxTournamentRetries,
 	}
 }
@@ -118,6 +118,24 @@ func (s *Service) ResetEvent(idOrURL string) error {
 		return err
 	}
 	return s.repo.FinishRun(runID, "succeeded", fmt.Sprintf("Reset %s", tournament.BraacketID))
+}
+
+func (s *Service) RequeueEvent(idOrURL string) error {
+	runID, err := s.repo.CreateRun("requeue-event")
+	if err != nil {
+		return err
+	}
+	tournament, err := s.resolveOrDiscoverTournament(runID, idOrURL)
+	if err != nil {
+		_ = s.repo.FinishRun(runID, "failed", err.Error())
+		return err
+	}
+	log.Printf("[sync] Requeueing tournament: %s", s.describeTournament(tournament))
+	if err := s.repo.QueueTournament(tournament.ID, true); err != nil {
+		_ = s.repo.FinishRun(runID, "failed", err.Error())
+		return err
+	}
+	return s.repo.FinishRun(runID, "succeeded", fmt.Sprintf("Requeued %s", tournament.BraacketID))
 }
 
 func (s *Service) processQueue(runID int, force bool) error {

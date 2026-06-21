@@ -3,6 +3,7 @@ package main
 import (
 	"braacketreplacement/internal/colley"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -373,6 +374,92 @@ VALUES
 	}
 }
 
+func TestSyncActionHandlers(t *testing.T) {
+	type call struct {
+		method string
+		target string
+		force  bool
+	}
+	calls := []call{}
+	server := &app{
+		syncRunnerFactory: func() (syncRunner, error) {
+			return syncRunnerStub{
+				syncEventFunc: func(idOrURL string, force bool) error {
+					calls = append(calls, call{method: "import", target: idOrURL, force: force})
+					return nil
+				},
+				resetEventFunc: func(idOrURL string) error {
+					calls = append(calls, call{method: "reset", target: idOrURL})
+					return nil
+				},
+				requeueEventFunc: func(idOrURL string) error {
+					calls = append(calls, call{method: "requeue", target: idOrURL})
+					return nil
+				},
+			}, nil
+		},
+	}
+
+	requeueRequest := httptest.NewRequest(http.MethodPost, "/api/sync/requeue", strings.NewReader(`{"braacketId":"BBB"}`))
+	requeueRequest.Header.Set("Content-Type", "application/json")
+	requeueRecorder := httptest.NewRecorder()
+	server.handleSyncRequeue(requeueRecorder, requeueRequest)
+	if requeueRecorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", requeueRecorder.Code, requeueRecorder.Body.String())
+	}
+
+	resetRequest := httptest.NewRequest(http.MethodPost, "/api/sync/reset", strings.NewReader(`{"target":"CCC"}`))
+	resetRequest.Header.Set("Content-Type", "application/json")
+	resetRecorder := httptest.NewRecorder()
+	server.handleSyncReset(resetRecorder, resetRequest)
+	if resetRecorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resetRecorder.Code, resetRecorder.Body.String())
+	}
+
+	importRequest := httptest.NewRequest(http.MethodPost, "/api/sync/import", strings.NewReader(`{"url":"https://braacket.com/tournament/DDD","force":true}`))
+	importRequest.Header.Set("Content-Type", "application/json")
+	importRecorder := httptest.NewRecorder()
+	server.handleSyncImport(importRecorder, importRequest)
+	if importRecorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", importRecorder.Code, importRecorder.Body.String())
+	}
+
+	if len(calls) != 3 {
+		t.Fatalf("expected 3 sync action calls, got %#v", calls)
+	}
+	if calls[0] != (call{method: "requeue", target: "BBB"}) {
+		t.Fatalf("unexpected requeue call: %#v", calls[0])
+	}
+	if calls[1] != (call{method: "reset", target: "CCC"}) {
+		t.Fatalf("unexpected reset call: %#v", calls[1])
+	}
+	if calls[2] != (call{method: "import", target: "https://braacket.com/tournament/DDD", force: true}) {
+		t.Fatalf("unexpected import call: %#v", calls[2])
+	}
+}
+
+func TestSyncActionHandlersValidateRequest(t *testing.T) {
+	server := &app{
+		syncRunnerFactory: func() (syncRunner, error) {
+			return syncRunnerStub{}, nil
+		},
+	}
+
+	getRecorder := httptest.NewRecorder()
+	server.handleSyncImport(getRecorder, httptest.NewRequest(http.MethodGet, "/api/sync/import", nil))
+	if getRecorder.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405, got %d: %s", getRecorder.Code, getRecorder.Body.String())
+	}
+
+	missingTargetRecorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/sync/requeue", strings.NewReader(`{"force":true}`))
+	request.Header.Set("Content-Type", "application/json")
+	server.handleSyncRequeue(missingTargetRecorder, request)
+	if missingTargetRecorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", missingTargetRecorder.Code, missingTargetRecorder.Body.String())
+	}
+}
+
 func TestPaginatePlayersCompactsByDefault(t *testing.T) {
 	players := []map[string]interface{}{
 		{
@@ -398,6 +485,33 @@ func TestPaginatePlayersCompactsByDefault(t *testing.T) {
 	if page[0]["rank"] != 2 {
 		t.Fatalf("expected rank 2, got %#v", page[0]["rank"])
 	}
+}
+
+type syncRunnerStub struct {
+	syncEventFunc    func(idOrURL string, force bool) error
+	resetEventFunc   func(idOrURL string) error
+	requeueEventFunc func(idOrURL string) error
+}
+
+func (s syncRunnerStub) SyncEvent(idOrURL string, force bool) error {
+	if s.syncEventFunc == nil {
+		return fmt.Errorf("unexpected SyncEvent call")
+	}
+	return s.syncEventFunc(idOrURL, force)
+}
+
+func (s syncRunnerStub) ResetEvent(idOrURL string) error {
+	if s.resetEventFunc == nil {
+		return fmt.Errorf("unexpected ResetEvent call")
+	}
+	return s.resetEventFunc(idOrURL)
+}
+
+func (s syncRunnerStub) RequeueEvent(idOrURL string) error {
+	if s.requeueEventFunc == nil {
+		return fmt.Errorf("unexpected RequeueEvent call")
+	}
+	return s.requeueEventFunc(idOrURL)
 }
 
 func TestPaginatePlayersPreservesRecordsWhenRequested(t *testing.T) {

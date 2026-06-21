@@ -27,9 +27,18 @@ import (
 var embeddedFiles embed.FS
 
 type app struct {
-	dbPath string
-	addr   string
-	cache  rankingCache
+	dbPath            string
+	addr              string
+	leagueSlug        string
+	cookieJarPath     string
+	cache             rankingCache
+	syncRunnerFactory func() (syncRunner, error)
+}
+
+type syncRunner interface {
+	SyncEvent(idOrURL string, force bool) error
+	ResetEvent(idOrURL string) error
+	RequeueEvent(idOrURL string) error
 }
 
 type overviewResponse struct {
@@ -129,8 +138,10 @@ func main() {
 	}
 
 	server := &app{
-		dbPath: envOrDefault("BRAACKET_DB_PATH", filepath.Join(wd, "data", "braacket.sqlite")),
-		addr:   envOrDefault("BRAACKET_SERVER_ADDR", ":8080"),
+		dbPath:        envOrDefault("BRAACKET_DB_PATH", filepath.Join(wd, "data", "braacket.sqlite")),
+		addr:          envOrDefault("BRAACKET_SERVER_ADDR", ":8080"),
+		leagueSlug:    envOrDefault("BRAACKET_LEAGUE_SLUG", ""),
+		cookieJarPath: envOrDefault("BRAACKET_COOKIE_JAR_PATH", filepath.Join(wd, "data", "braacket-cookies.json")),
 		cache: rankingCache{
 			items: map[string]cachedRankingResult{},
 		},
@@ -147,6 +158,9 @@ func main() {
 	mux.HandleFunc("/api/sync/summary", server.handleSyncSummary)
 	mux.HandleFunc("/api/sync/runs", server.handleSyncRuns)
 	mux.HandleFunc("/api/sync/tournaments", server.handleSyncTournaments)
+	mux.HandleFunc("/api/sync/requeue", server.handleSyncRequeue)
+	mux.HandleFunc("/api/sync/reset", server.handleSyncReset)
+	mux.HandleFunc("/api/sync/import", server.handleSyncImport)
 	mux.Handle("/", server.staticHandler())
 
 	log.Printf("braacket replacement server listening on %s", server.addr)
@@ -619,6 +633,24 @@ func (a *app) handleSyncTournaments(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (a *app) handleSyncRequeue(w http.ResponseWriter, r *http.Request) {
+	a.handleSyncAction(w, r, "requeue", func(runner syncRunner, target string, force bool) error {
+		return runner.RequeueEvent(target)
+	})
+}
+
+func (a *app) handleSyncReset(w http.ResponseWriter, r *http.Request) {
+	a.handleSyncAction(w, r, "reset", func(runner syncRunner, target string, force bool) error {
+		return runner.ResetEvent(target)
+	})
+}
+
+func (a *app) handleSyncImport(w http.ResponseWriter, r *http.Request) {
+	a.handleSyncAction(w, r, "import", func(runner syncRunner, target string, force bool) error {
+		return runner.SyncEvent(target, force)
+	})
+}
+
 func (a *app) getRankingPlayers(system string, startDate string, endDate string, minTournaments int, tournamentNameLike string) ([]map[string]interface{}, time.Time, error) {
 	cacheKey := strings.Join([]string{
 		system,
@@ -715,6 +747,53 @@ func writeError(w http.ResponseWriter, status int, err error) {
 	})
 }
 
+func (a *app) handleSyncAction(w http.ResponseWriter, r *http.Request, action string, execute func(runner syncRunner, target string, force bool) error) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, fmt.Errorf("method not allowed"))
+		return
+	}
+
+	var request struct {
+		Target     string `json:"target"`
+		BraacketID string `json:"braacketId"`
+		URL        string `json:"url"`
+		Force      bool   `json:"force"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	target := strings.TrimSpace(request.Target)
+	if target == "" {
+		target = strings.TrimSpace(request.BraacketID)
+	}
+	if target == "" {
+		target = strings.TrimSpace(request.URL)
+	}
+	if target == "" {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("missing target"))
+		return
+	}
+
+	runner, err := a.newSyncRunner()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if err := execute(runner, target, request.Force); err != nil {
+		writeError(w, http.StatusBadGateway, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": "ok",
+		"action": action,
+		"target": target,
+		"force":  request.Force,
+	})
+}
+
 func openSyncRepo(dbPath string) (*synccore.Repository, error) {
 	repo, err := synccore.Open(dbPath, "")
 	if err != nil {
@@ -725,6 +804,47 @@ func openSyncRepo(dbPath string) (*synccore.Repository, error) {
 		return nil, err
 	}
 	return repo, nil
+}
+
+func (a *app) newSyncRunner() (syncRunner, error) {
+	if a.syncRunnerFactory != nil {
+		return a.syncRunnerFactory()
+	}
+	leagueSlug := strings.TrimSpace(a.leagueSlug)
+	if leagueSlug == "" {
+		var err error
+		leagueSlug, err = detectLeagueSlug(a.dbPath)
+		if err != nil {
+			return nil, err
+		}
+	}
+	repo, err := synccore.Open(a.dbPath, leagueSlug)
+	if err != nil {
+		return nil, err
+	}
+	if err := synccore.ApplySchema(repo); err != nil {
+		_ = repo.Close()
+		return nil, err
+	}
+	client := &http.Client{Timeout: 45 * time.Second}
+	policy := synccore.DefaultRetryPolicy()
+	session := synccore.NewBrowserSession(a.cookieJarPath, defaultHeaderProfile(), policy, client)
+	if err := session.Init(); err != nil {
+		_ = repo.Close()
+		return nil, err
+	}
+	return &managedSyncRunner{
+		repo: repo,
+		service: synccore.NewService(repo, session, synccore.SyncConfig{
+			ListingURL:         fmt.Sprintf("https://braacket.com/league/%s/tournament", leagueSlug),
+			DiscoverPageSize:   100,
+			DiscoverMaxPages:   500,
+			CookieJarPath:      a.cookieJarPath,
+			HeaderProfile:      defaultHeaderProfile(),
+			RetryPolicy:        policy,
+			MaxTournamentRetry: policy.MaxTournamentRetries,
+		}),
+	}, nil
 }
 
 func openAppDB(dbPath string) (*sql.DB, error) {
@@ -786,6 +906,26 @@ func cloneMap(input map[string]interface{}) map[string]interface{} {
 	return cloned
 }
 
+type managedSyncRunner struct {
+	repo    *synccore.Repository
+	service *synccore.Service
+}
+
+func (r *managedSyncRunner) SyncEvent(idOrURL string, force bool) error {
+	defer r.repo.Close()
+	return r.service.SyncEvent(idOrURL, force)
+}
+
+func (r *managedSyncRunner) ResetEvent(idOrURL string) error {
+	defer r.repo.Close()
+	return r.service.ResetEvent(idOrURL)
+}
+
+func (r *managedSyncRunner) RequeueEvent(idOrURL string) error {
+	defer r.repo.Close()
+	return r.service.RequeueEvent(idOrURL)
+}
+
 func syncRunResponseFromRecord(item synccore.SyncRunSummary) syncRunResponse {
 	return syncRunResponse{
 		ID:              item.ID,
@@ -809,6 +949,40 @@ func defaultDate(raw string, fallback time.Time) string {
 	}
 	return fallback.Format("2006-01-02")
 }
+
+func detectLeagueSlug(dbPath string) (string, error) {
+	db, err := openAppDB(dbPath)
+	if err != nil {
+		return "", err
+	}
+	defer db.Close()
+
+	var leagueSlug string
+	err = db.QueryRow(`
+SELECT COALESCE(MAX(league_slug), '')
+FROM tournaments
+WHERE league_slug IS NOT NULL AND league_slug != ''`).Scan(&leagueSlug)
+	if err != nil {
+		return "", err
+	}
+	leagueSlug = strings.TrimSpace(leagueSlug)
+	if leagueSlug == "" {
+		return "", fmt.Errorf("could not determine league slug from database; set BRAACKET_LEAGUE_SLUG")
+	}
+	return leagueSlug, nil
+}
+
+func defaultHeaderProfile() synccore.HeaderProfile {
+	return synccore.HeaderProfile{
+		UserAgent:       defaultUserAgent,
+		SecCHUA:         `"Google Chrome";v="137", "Chromium";v="137", "Not/A)Brand";v="24"`,
+		SecCHUAMobile:   "?0",
+		SecCHUAPlatform: `"macOS"`,
+		AcceptLanguage:  "en-US,en;q=0.9",
+	}
+}
+
+const defaultUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36"
 
 func envOrDefault(name string, fallback string) string {
 	value := strings.TrimSpace(os.Getenv(name))
