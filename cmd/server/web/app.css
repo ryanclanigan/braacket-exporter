@@ -241,6 +241,15 @@ button {
   gap: 14px;
 }
 
+.sync-source-preview {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.55);
+  display: grid;
+  gap: 10px;
+}
+
 .detail-list {
   display: grid;
   gap: 12px;
@@ -267,6 +276,26 @@ button {
   justify-content: space-between;
   gap: 12px;
   align-items: center;
+}
+
+.preview-link {
+  color: var(--accent-strong);
+  text-decoration: none;
+  font-size: 0.95rem;
+}
+
+.source-preview-code {
+  margin: 0;
+  padding: 14px;
+  border-radius: 14px;
+  background: #1f1d19;
+  color: #f8f0de;
+  overflow: auto;
+  max-height: 360px;
+  font-size: 0.84rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .pager {

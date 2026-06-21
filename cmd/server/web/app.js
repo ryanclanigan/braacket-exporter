@@ -7,6 +7,9 @@ const syncActionFeedback = document.querySelector("#sync-action-feedback");
 const syncDetailMeta = document.querySelector("#sync-detail-meta");
 const syncAttemptList = document.querySelector("#sync-attempt-list");
 const syncSourcePageList = document.querySelector("#sync-source-page-list");
+const syncSourceLink = document.querySelector("#sync-source-link");
+const syncSourcePreviewMeta = document.querySelector("#sync-source-preview-meta");
+const syncSourcePreviewCode = document.querySelector("#sync-source-preview-code");
 const rankingMeta = document.querySelector("#ranking-meta");
 const rankingRows = document.querySelector("#ranking-rows");
 const playerResults = document.querySelector("#player-results");
@@ -31,6 +34,7 @@ const rankingState = {
 
 const syncState = {
   selectedBraacketId: "",
+  selectedSourcePageId: 0,
 };
 
 function defaultDate(offsetDays) {
@@ -241,6 +245,11 @@ function renderSyncTournamentDetail(data) {
                     ${sourcePage.antiBotClass ? `${escapeHTML(humanizeState(sourcePage.antiBotClass))} • ` : ""}
                     ${sourcePage.errorMessage ? escapeHTML(sourcePage.errorMessage) : "No fetch error recorded"}
                   </div>
+                  <div class="stack-actions">
+                    <button class="button-secondary" type="button" data-source-page-id="${sourcePage.id}">
+                      Preview HTML
+                    </button>
+                  </div>
                 </article>
               `
             )
@@ -248,6 +257,8 @@ function renderSyncTournamentDetail(data) {
         : `<div class="muted">No stored source pages for this tournament yet.</div>`
     }
   `;
+
+  resetSourcePreview();
 }
 
 function renderRankingResponse(data) {
@@ -408,15 +419,32 @@ async function loadSyncDiagnostics() {
 
 async function loadSyncTournamentDetail(braacketId) {
   syncState.selectedBraacketId = braacketId;
+  syncState.selectedSourcePageId = 0;
   syncDetailMeta.textContent = `Loading detail for ${braacketId}...`;
   syncAttemptList.innerHTML = "";
   syncSourcePageList.innerHTML = "";
+  resetSourcePreview();
   const response = await fetch(`/api/sync/tournament?braacketId=${encodeURIComponent(braacketId)}`);
   const data = await response.json();
   if (!response.ok) {
     throw new Error(data.error || "Failed to load tournament detail");
   }
   renderSyncTournamentDetail(data);
+}
+
+async function loadSourcePagePreview(sourcePageID) {
+  syncState.selectedSourcePageId = sourcePageID;
+  syncSourcePreviewMeta.textContent = `Loading source page #${sourcePageID}...`;
+  syncSourcePreviewCode.textContent = "";
+  const response = await fetch(`/api/sync/source-page?id=${encodeURIComponent(sourcePageID)}`);
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.error || "Failed to load source page preview");
+  }
+  syncSourceLink.href = data.url || "#";
+  syncSourcePreviewMeta.textContent =
+    `${humanizeState(data.pageType)} • ${data.httpStatus ? `HTTP ${data.httpStatus}` : "No status"} • fetched ${formatDateTime(data.fetchedAt)}`;
+  syncSourcePreviewCode.textContent = data.htmlPreview || data.html || "";
 }
 
 async function runSyncAction(action, payload) {
@@ -618,6 +646,21 @@ syncTournamentRows.addEventListener("click", (event) => {
   })();
 });
 
+syncSourcePageList.addEventListener("click", (event) => {
+  const previewButton = event.target.closest("button[data-source-page-id]");
+  if (!previewButton) {
+    return;
+  }
+  const sourcePageID = Number(previewButton.dataset.sourcePageId);
+  if (!sourcePageID) {
+    return;
+  }
+  void loadSourcePagePreview(sourcePageID).catch((error) => {
+    syncSourcePreviewMeta.textContent = error instanceof Error ? error.message : String(error);
+    syncSourcePreviewCode.textContent = "";
+  });
+});
+
 previousPageButton.addEventListener("click", () => {
   rankingState.offset = Math.max(0, rankingState.offset - rankingState.limit);
   void loadRankings();
@@ -652,6 +695,12 @@ function escapeHTML(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function resetSourcePreview() {
+  syncSourceLink.href = "#";
+  syncSourcePreviewMeta.textContent = "Select a source page to load its stored HTML preview.";
+  syncSourcePreviewCode.textContent = "";
 }
 
 setDefaultFilters();
