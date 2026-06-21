@@ -3,6 +3,7 @@ const syncSummary = document.querySelector("#sync-summary");
 const syncStateCards = document.querySelector("#sync-state-cards");
 const syncRunRows = document.querySelector("#sync-run-rows");
 const syncTournamentRows = document.querySelector("#sync-tournament-rows");
+const syncActionFeedback = document.querySelector("#sync-action-feedback");
 const rankingMeta = document.querySelector("#ranking-meta");
 const rankingRows = document.querySelector("#ranking-rows");
 const playerResults = document.querySelector("#player-results");
@@ -144,11 +145,24 @@ function renderSyncTournaments(data) {
                 ${tournament.lastErrorMessage ? `${escapeHTML(tournament.lastErrorMessage)}<br />` : "No error recorded"}
                 ${tournament.lastAttemptedAt ? `<span>attempted ${formatDateTime(tournament.lastAttemptedAt)}</span>` : ""}
               </td>
+              <td>
+                <div class="stack-actions">
+                  <button class="button-secondary" type="button" data-sync-action="requeue" data-target="${escapeHTML(tournament.braacketId)}">
+                    Requeue
+                  </button>
+                  <button class="button-secondary" type="button" data-sync-action="reset" data-target="${escapeHTML(tournament.braacketId)}">
+                    Reset
+                  </button>
+                  <button class="button-primary" type="button" data-sync-action="import" data-target="${escapeHTML(tournament.braacketId)}">
+                    Import Now
+                  </button>
+                </div>
+              </td>
             </tr>
           `
         )
         .join("")
-    : `<tr><td colspan="5" class="muted">No tournaments matched this filter.</td></tr>`;
+    : `<tr><td colspan="6" class="muted">No tournaments matched this filter.</td></tr>`;
 }
 
 function renderRankingResponse(data) {
@@ -299,6 +313,19 @@ async function loadSyncDiagnostics() {
   }
 }
 
+async function runSyncAction(action, payload) {
+  const response = await fetch(`/api/sync/${action}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.error || `Failed to ${action} tournament`);
+  }
+  return data;
+}
+
 async function loadRankings() {
   rankingMeta.textContent = "Loading rankings...";
   rankingPageMeta.textContent = "";
@@ -430,6 +457,45 @@ refreshOverviewButton.addEventListener("click", () => {
 
 refreshSyncButton.addEventListener("click", () => {
   void loadSyncDiagnostics();
+});
+
+syncTournamentRows.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-sync-action]");
+  if (!button) {
+    return;
+  }
+  const action = button.dataset.syncAction;
+  const target = button.dataset.target;
+  if (!action || !target) {
+    return;
+  }
+
+  const force = action === "import";
+  const confirmMessage =
+    action === "reset"
+      ? `Reset imported data for ${target}? This keeps the tournament queued for a later import.`
+      : action === "import"
+        ? `Import ${target} now? This performs a live Braacket fetch.`
+        : `Requeue ${target} for the next safe sync pass?`;
+  if (!window.confirm(confirmMessage)) {
+    return;
+  }
+
+  syncActionFeedback.textContent = `${humanizeState(action)} ${target}...`;
+  void (async () => {
+    try {
+      await runSyncAction(action, { braacketId: target, force });
+      syncActionFeedback.textContent =
+        action === "reset"
+          ? `Reset ${target}.`
+          : action === "import"
+            ? `Imported ${target}.`
+            : `Requeued ${target}.`;
+      await loadSyncDiagnostics();
+    } catch (error) {
+      syncActionFeedback.textContent = error instanceof Error ? error.message : String(error);
+    }
+  })();
 });
 
 previousPageButton.addEventListener("click", () => {

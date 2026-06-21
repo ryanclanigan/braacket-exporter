@@ -227,6 +227,10 @@ button {
   grid-template-columns: 180px 1fr auto;
 }
 
+#sync-action-feedback {
+  margin-bottom: 4px;
+}
+
 .pager {
   margin-top: 16px;
   display: flex;
