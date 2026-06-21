@@ -4,6 +4,9 @@ const syncStateCards = document.querySelector("#sync-state-cards");
 const syncRunRows = document.querySelector("#sync-run-rows");
 const syncTournamentRows = document.querySelector("#sync-tournament-rows");
 const syncActionFeedback = document.querySelector("#sync-action-feedback");
+const syncDetailMeta = document.querySelector("#sync-detail-meta");
+const syncAttemptList = document.querySelector("#sync-attempt-list");
+const syncSourcePageList = document.querySelector("#sync-source-page-list");
 const rankingMeta = document.querySelector("#ranking-meta");
 const rankingRows = document.querySelector("#ranking-rows");
 const playerResults = document.querySelector("#player-results");
@@ -24,6 +27,10 @@ const rankingPageMeta = document.querySelector("#ranking-page-meta");
 const rankingState = {
   limit: 50,
   offset: 0,
+};
+
+const syncState = {
+  selectedBraacketId: "",
 };
 
 function defaultDate(offsetDays) {
@@ -147,6 +154,9 @@ function renderSyncTournaments(data) {
               </td>
               <td>
                 <div class="stack-actions">
+                  <button class="button-secondary" type="button" data-sync-detail="${escapeHTML(tournament.braacketId)}">
+                    Inspect
+                  </button>
                   <button class="button-secondary" type="button" data-sync-action="requeue" data-target="${escapeHTML(tournament.braacketId)}">
                     Requeue
                   </button>
@@ -163,6 +173,81 @@ function renderSyncTournaments(data) {
         )
         .join("")
     : `<tr><td colspan="6" class="muted">No tournaments matched this filter.</td></tr>`;
+}
+
+function renderSyncTournamentDetail(data) {
+  const tournament = data.tournament;
+  const attempts = Array.isArray(data.attempts) ? data.attempts : [];
+  const sourcePages = Array.isArray(data.sourcePages) ? data.sourcePages : [];
+
+  syncDetailMeta.innerHTML = tournament
+    ? `
+      <strong>${escapeHTML(tournament.name || tournament.braacketId)}</strong>
+      <span class="muted">${escapeHTML(tournament.braacketId)} • ${escapeHTML(humanizeState(tournament.queueState))}</span>
+    `
+    : "Select a tournament to inspect recent attempts and fetched pages.";
+
+  syncAttemptList.innerHTML = `
+    <div class="detail-section-title">Recent Attempts</div>
+    ${
+      attempts.length
+        ? attempts
+            .map(
+              (attempt) => `
+                <article class="detail-card">
+                  <div class="detail-card-header">
+                    <strong>Attempt #${attempt.id}</strong>
+                    <span class="state-pill state-${attempt.status}">${escapeHTML(humanizeState(attempt.status))}</span>
+                  </div>
+                  <div class="muted">
+                    run #${attempt.runId} • retry ${attempt.retryCount} • ${attempt.requestCount} requests • ${attempt.pagesFetched} pages • ${attempt.durationMs} ms
+                  </div>
+                  <div class="muted">
+                    started ${formatDateTime(attempt.startedAt)}${attempt.finishedAt ? ` • finished ${formatDateTime(attempt.finishedAt)}` : ""}
+                  </div>
+                  <div class="muted">
+                    statuses ${escapeHTML(attempt.httpStatuses || "[]")}${attempt.retryable ? " • retryable" : ""}
+                  </div>
+                  <div class="muted">
+                    ${attempt.errorClass ? `<strong>${escapeHTML(humanizeState(attempt.errorClass))}</strong><br />` : ""}
+                    ${attempt.errorMessage ? escapeHTML(attempt.errorMessage) : "No error recorded"}
+                  </div>
+                </article>
+              `
+            )
+            .join("")
+        : `<div class="muted">No attempts recorded yet.</div>`
+    }
+  `;
+
+  syncSourcePageList.innerHTML = `
+    <div class="detail-section-title">Fetched Source Pages</div>
+    ${
+      sourcePages.length
+        ? sourcePages
+            .map(
+              (sourcePage) => `
+                <article class="detail-card">
+                  <div class="detail-card-header">
+                    <strong>${escapeHTML(sourcePage.pageType)}</strong>
+                    <span class="muted">${sourcePage.httpStatus ? `HTTP ${sourcePage.httpStatus}` : "No status recorded"}</span>
+                  </div>
+                  <div class="muted">${escapeHTML(sourcePage.url)}</div>
+                  <div class="muted">
+                    fetched ${formatDateTime(sourcePage.fetchedAt)}
+                    ${sourcePage.attemptId ? ` • attempt #${sourcePage.attemptId}` : ""}
+                  </div>
+                  <div class="muted">
+                    ${sourcePage.antiBotClass ? `${escapeHTML(humanizeState(sourcePage.antiBotClass))} • ` : ""}
+                    ${sourcePage.errorMessage ? escapeHTML(sourcePage.errorMessage) : "No fetch error recorded"}
+                  </div>
+                </article>
+              `
+            )
+            .join("")
+        : `<div class="muted">No stored source pages for this tournament yet.</div>`
+    }
+  `;
 }
 
 function renderRankingResponse(data) {
@@ -303,6 +388,14 @@ async function loadSyncTournaments() {
   const response = await fetch(`/api/sync/tournaments?${params.toString()}`);
   const data = await response.json();
   renderSyncTournaments(data);
+  if (syncState.selectedBraacketId) {
+    const stillVisible = Array.isArray(data.tournaments)
+      && data.tournaments.some((tournament) => tournament.braacketId === syncState.selectedBraacketId);
+    if (!stillVisible) {
+      syncState.selectedBraacketId = "";
+      renderSyncTournamentDetail({});
+    }
+  }
 }
 
 async function loadSyncDiagnostics() {
@@ -311,6 +404,19 @@ async function loadSyncDiagnostics() {
   } catch (error) {
     syncSummary.textContent = error instanceof Error ? error.message : String(error);
   }
+}
+
+async function loadSyncTournamentDetail(braacketId) {
+  syncState.selectedBraacketId = braacketId;
+  syncDetailMeta.textContent = `Loading detail for ${braacketId}...`;
+  syncAttemptList.innerHTML = "";
+  syncSourcePageList.innerHTML = "";
+  const response = await fetch(`/api/sync/tournament?braacketId=${encodeURIComponent(braacketId)}`);
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.error || "Failed to load tournament detail");
+  }
+  renderSyncTournamentDetail(data);
 }
 
 async function runSyncAction(action, payload) {
@@ -460,6 +566,17 @@ refreshSyncButton.addEventListener("click", () => {
 });
 
 syncTournamentRows.addEventListener("click", (event) => {
+  const detailButton = event.target.closest("button[data-sync-detail]");
+  if (detailButton) {
+    const braacketId = detailButton.dataset.syncDetail;
+    if (braacketId) {
+      void loadSyncTournamentDetail(braacketId).catch((error) => {
+        syncDetailMeta.textContent = error instanceof Error ? error.message : String(error);
+      });
+    }
+    return;
+  }
+
   const button = event.target.closest("button[data-sync-action]");
   if (!button) {
     return;
@@ -492,6 +609,9 @@ syncTournamentRows.addEventListener("click", (event) => {
             ? `Imported ${target}.`
             : `Requeued ${target}.`;
       await loadSyncDiagnostics();
+      if (syncState.selectedBraacketId === target) {
+        await loadSyncTournamentDetail(target);
+      }
     } catch (error) {
       syncActionFeedback.textContent = error instanceof Error ? error.message : String(error);
     }

@@ -231,6 +231,44 @@ button {
   margin-bottom: 4px;
 }
 
+.sync-detail-panel {
+  margin-top: 18px;
+  padding: 18px;
+  border-radius: 20px;
+  background: rgba(255, 250, 240, 0.7);
+  border: 1px solid var(--line);
+  display: grid;
+  gap: 14px;
+}
+
+.detail-list {
+  display: grid;
+  gap: 12px;
+}
+
+.detail-section-title {
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink-soft);
+}
+
+.detail-card {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 14px 16px;
+  background: var(--panel-strong);
+  display: grid;
+  gap: 6px;
+}
+
+.detail-card-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
 .pager {
   margin-top: 16px;
   display: flex;
