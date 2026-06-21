@@ -230,6 +230,149 @@ VALUES
 	}
 }
 
+func TestSyncDiagnosticsAPIHandlers(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "sync-diagnostics.sqlite")
+	setupSQLiteFixture(t, dbPath, `
+CREATE TABLE sync_runs (
+  id INTEGER PRIMARY KEY,
+  mode TEXT NOT NULL,
+  status TEXT NOT NULL,
+  started_at TEXT NOT NULL,
+  finished_at TEXT,
+  discovered_count INTEGER NOT NULL DEFAULT 0,
+  imported_count INTEGER NOT NULL DEFAULT 0,
+  failed_count INTEGER NOT NULL DEFAULT 0,
+  skipped_count INTEGER NOT NULL DEFAULT 0,
+  summary TEXT
+);
+CREATE TABLE tournaments (
+  id INTEGER PRIMARY KEY,
+  braacket_id TEXT NOT NULL UNIQUE,
+  url TEXT NOT NULL,
+  league_slug TEXT NOT NULL,
+  name TEXT,
+  date_text TEXT,
+  tournament_date TEXT,
+  queue_state TEXT NOT NULL,
+  first_seen_at TEXT NOT NULL,
+  last_seen_at TEXT NOT NULL,
+  last_attempted_at TEXT,
+  last_imported_at TEXT,
+  first_seen_run_id INTEGER,
+  retry_count INTEGER NOT NULL DEFAULT 0,
+  last_error_class TEXT,
+  last_error_message TEXT,
+  next_retry_at TEXT,
+  current_attempt_id INTEGER
+);
+CREATE TABLE tournament_import_attempts (
+  id INTEGER PRIMARY KEY,
+  tournament_id INTEGER NOT NULL,
+  run_id INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  started_at TEXT NOT NULL,
+  finished_at TEXT,
+  error_class TEXT,
+  error_message TEXT,
+  retry_count INTEGER NOT NULL DEFAULT 0,
+  request_count INTEGER NOT NULL DEFAULT 0,
+  pages_fetched INTEGER NOT NULL DEFAULT 0,
+  http_statuses TEXT,
+  duration_ms INTEGER,
+  retryable INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE players (
+  id INTEGER PRIMARY KEY,
+  canonical_name TEXT,
+  braacket_league_player_id TEXT,
+  name TEXT,
+  first_seen_at TEXT,
+  last_seen_at TEXT
+);
+CREATE TABLE tournament_players (
+  id INTEGER PRIMARY KEY,
+  tournament_id INTEGER NOT NULL,
+  attempt_id INTEGER NOT NULL,
+  canonical_player_id INTEGER,
+  name TEXT
+);
+CREATE TABLE matches (
+  id INTEGER PRIMARY KEY,
+  tournament_id INTEGER NOT NULL,
+  attempt_id INTEGER NOT NULL,
+  match_key TEXT NOT NULL
+);
+INSERT INTO sync_runs (id, mode, status, started_at, finished_at, discovered_count, imported_count, failed_count, skipped_count, summary)
+VALUES
+  (1, 'discover', 'succeeded', '2026-06-19T01:00:00Z', '2026-06-19T01:02:00Z', 12, 0, 0, 0, 'Discovered 12 tournaments'),
+  (2, 'run', 'running', '2026-06-20T01:00:00Z', NULL, 0, 3, 1, 2, 'Processing queue');
+INSERT INTO tournaments (
+  id, braacket_id, url, league_slug, name, date_text, tournament_date, queue_state,
+  first_seen_at, last_seen_at, last_attempted_at, last_imported_at, retry_count,
+  last_error_class, last_error_message, next_retry_at, current_attempt_id
+)
+VALUES
+  (10, 'AAA', 'https://braacket.com/tournament/AAA', 'comelee', 'Imported Event', 'June 1', '2026-06-01', 'imported',
+   '2026-06-01T00:00:00Z', '2026-06-20T00:00:00Z', '2026-06-20T00:00:00Z', '2026-06-20T00:05:00Z', 0,
+   NULL, NULL, NULL, NULL),
+  (11, 'BBB', 'https://braacket.com/tournament/BBB', 'comelee', 'Retry Event', 'June 2', '2026-06-02', 'failed_retryable',
+   '2026-06-02T00:00:00Z', '2026-06-20T00:01:00Z', '2026-06-20T00:01:00Z', NULL, 2,
+   'rate_limit', 'HTTP 429', '2026-06-20T06:00:00Z', NULL),
+  (12, 'CCC', 'https://braacket.com/tournament/CCC', 'comelee', 'Queued Event', 'June 3', '2026-06-03', 'queued',
+   '2026-06-03T00:00:00Z', '2026-06-20T00:02:00Z', NULL, NULL, 0,
+   NULL, NULL, NULL, NULL);
+INSERT INTO tournament_players (id, tournament_id, attempt_id, canonical_player_id, name)
+VALUES
+  (100, 10, 1, 1, 'Alice'),
+  (101, 10, 1, 2, 'Bob');
+INSERT INTO matches (id, tournament_id, attempt_id, match_key)
+VALUES
+  (200, 10, 1, 'm1');
+`)
+
+	server := &app{dbPath: dbPath}
+
+	summaryRecorder := httptest.NewRecorder()
+	server.handleSyncSummary(summaryRecorder, httptest.NewRequest(http.MethodGet, "/api/sync/summary", nil))
+	if summaryRecorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", summaryRecorder.Code, summaryRecorder.Body.String())
+	}
+	if !strings.Contains(summaryRecorder.Body.String(), `"state": "failed_retryable"`) {
+		t.Fatalf("expected failed_retryable in summary: %s", summaryRecorder.Body.String())
+	}
+	if !strings.Contains(summaryRecorder.Body.String(), `"mode": "run"`) {
+		t.Fatalf("expected latest run in summary: %s", summaryRecorder.Body.String())
+	}
+
+	runsRecorder := httptest.NewRecorder()
+	server.handleSyncRuns(runsRecorder, httptest.NewRequest(http.MethodGet, "/api/sync/runs?limit=1", nil))
+	if runsRecorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", runsRecorder.Code, runsRecorder.Body.String())
+	}
+	if !strings.Contains(runsRecorder.Body.String(), `"status": "running"`) {
+		t.Fatalf("expected running run in runs response: %s", runsRecorder.Body.String())
+	}
+	if strings.Contains(runsRecorder.Body.String(), `"mode": "discover"`) {
+		t.Fatalf("expected limit=1 to exclude older run: %s", runsRecorder.Body.String())
+	}
+
+	tournamentsRecorder := httptest.NewRecorder()
+	server.handleSyncTournaments(tournamentsRecorder, httptest.NewRequest(http.MethodGet, "/api/sync/tournaments?state=failed_retryable&search=Retry", nil))
+	if tournamentsRecorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", tournamentsRecorder.Code, tournamentsRecorder.Body.String())
+	}
+	body := tournamentsRecorder.Body.String()
+	if !strings.Contains(body, `"braacketId": "BBB"`) {
+		t.Fatalf("expected BBB in tournament diagnostics: %s", body)
+	}
+	if !strings.Contains(body, `"lastErrorMessage": "HTTP 429"`) {
+		t.Fatalf("expected HTTP 429 details in tournament diagnostics: %s", body)
+	}
+	if strings.Contains(body, `"braacketId": "AAA"`) {
+		t.Fatalf("expected state+search filter to exclude AAA: %s", body)
+	}
+}
+
 func TestPaginatePlayersCompactsByDefault(t *testing.T) {
 	players := []map[string]interface{}{
 		{

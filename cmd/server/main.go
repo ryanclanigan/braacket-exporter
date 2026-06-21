@@ -4,6 +4,7 @@ import (
 	"braacketreplacement/internal/colley"
 	"braacketreplacement/internal/elo"
 	"braacketreplacement/internal/regions"
+	"braacketreplacement/internal/synccore"
 	"database/sql"
 	"embed"
 	"encoding/json"
@@ -41,13 +42,13 @@ type overviewResponse struct {
 }
 
 type playerSearchResult struct {
-	CanonicalPlayerID      int     `json:"canonicalPlayerId"`
-	Name                   string  `json:"name"`
-	BraacketLeaguePlayerID string  `json:"braacketLeaguePlayerId,omitempty"`
-	RegionSlug             string  `json:"regionSlug,omitempty"`
-	RegionName             string  `json:"regionName,omitempty"`
-	Tournaments            int     `json:"tournaments"`
-	Matches                int     `json:"matches"`
+	CanonicalPlayerID      int    `json:"canonicalPlayerId"`
+	Name                   string `json:"name"`
+	BraacketLeaguePlayerID string `json:"braacketLeaguePlayerId,omitempty"`
+	RegionSlug             string `json:"regionSlug,omitempty"`
+	RegionName             string `json:"regionName,omitempty"`
+	Tournaments            int    `json:"tournaments"`
+	Matches                int    `json:"matches"`
 }
 
 type regionResponse struct {
@@ -71,6 +72,44 @@ type rankingResponse struct {
 	IncludeRecords     bool        `json:"includeRecords"`
 	GeneratedAt        string      `json:"generatedAt"`
 	Players            interface{} `json:"players"`
+}
+
+type syncRunResponse struct {
+	ID              int    `json:"id"`
+	Mode            string `json:"mode"`
+	Status          string `json:"status"`
+	StartedAt       string `json:"startedAt"`
+	FinishedAt      string `json:"finishedAt,omitempty"`
+	DiscoveredCount int    `json:"discoveredCount"`
+	ImportedCount   int    `json:"importedCount"`
+	FailedCount     int    `json:"failedCount"`
+	SkippedCount    int    `json:"skippedCount"`
+	Summary         string `json:"summary,omitempty"`
+}
+
+type syncQueueStateCountResponse struct {
+	State string `json:"state"`
+	Count int    `json:"count"`
+}
+
+type syncTournamentResponse struct {
+	ID               int    `json:"id"`
+	BraacketID       string `json:"braacketId"`
+	URL              string `json:"url"`
+	LeagueSlug       string `json:"leagueSlug"`
+	Name             string `json:"name,omitempty"`
+	DateText         string `json:"dateText,omitempty"`
+	TournamentDate   string `json:"tournamentDate,omitempty"`
+	QueueState       string `json:"queueState"`
+	RetryCount       int    `json:"retryCount"`
+	NextRetryAt      string `json:"nextRetryAt,omitempty"`
+	LastAttemptedAt  string `json:"lastAttemptedAt,omitempty"`
+	LastImportedAt   string `json:"lastImportedAt,omitempty"`
+	LastErrorClass   string `json:"lastErrorClass,omitempty"`
+	LastErrorMessage string `json:"lastErrorMessage,omitempty"`
+	CurrentAttemptID int    `json:"currentAttemptId,omitempty"`
+	PlayerCount      int    `json:"playerCount"`
+	MatchCount       int    `json:"matchCount"`
 }
 
 type rankingCache struct {
@@ -105,6 +144,9 @@ func main() {
 	mux.HandleFunc("/api/regions/assign", server.handleAssignRegion)
 	mux.HandleFunc("/api/regions/unassign", server.handleUnassignRegion)
 	mux.HandleFunc("/api/rankings", server.handleRankings)
+	mux.HandleFunc("/api/sync/summary", server.handleSyncSummary)
+	mux.HandleFunc("/api/sync/runs", server.handleSyncRuns)
+	mux.HandleFunc("/api/sync/tournaments", server.handleSyncTournaments)
 	mux.Handle("/", server.staticHandler())
 
 	log.Printf("braacket replacement server listening on %s", server.addr)
@@ -467,6 +509,116 @@ func (a *app) handleRankings(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (a *app) handleSyncSummary(w http.ResponseWriter, r *http.Request) {
+	repo, err := openSyncRepo(a.dbPath)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	defer repo.Close()
+
+	counts, err := repo.ListQueueStateCounts()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	runs, err := repo.ListRecentRuns(1)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	responseCounts := make([]syncQueueStateCountResponse, 0, len(counts))
+	total := 0
+	for _, item := range counts {
+		total += item.Count
+		responseCounts = append(responseCounts, syncQueueStateCountResponse{
+			State: item.State,
+			Count: item.Count,
+		})
+	}
+
+	response := map[string]any{
+		"queueStates": responseCounts,
+		"total":       total,
+	}
+	if len(runs) > 0 {
+		response["latestRun"] = syncRunResponseFromRecord(runs[0])
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (a *app) handleSyncRuns(w http.ResponseWriter, r *http.Request) {
+	repo, err := openSyncRepo(a.dbPath)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	defer repo.Close()
+
+	limit := atoiSafe(r.URL.Query().Get("limit"))
+	runs, err := repo.ListRecentRuns(limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	response := make([]syncRunResponse, 0, len(runs))
+	for _, item := range runs {
+		response = append(response, syncRunResponseFromRecord(item))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"runs": response,
+	})
+}
+
+func (a *app) handleSyncTournaments(w http.ResponseWriter, r *http.Request) {
+	repo, err := openSyncRepo(a.dbPath)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	defer repo.Close()
+
+	state := strings.TrimSpace(r.URL.Query().Get("state"))
+	search := strings.TrimSpace(r.URL.Query().Get("search"))
+	limit := atoiSafe(r.URL.Query().Get("limit"))
+	rows, err := repo.ListTournamentSummaries(state, search, limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	response := make([]syncTournamentResponse, 0, len(rows))
+	for _, item := range rows {
+		response = append(response, syncTournamentResponse{
+			ID:               item.ID,
+			BraacketID:       item.BraacketID,
+			URL:              item.URL,
+			LeagueSlug:       item.LeagueSlug,
+			Name:             item.Name,
+			DateText:         item.DateText,
+			TournamentDate:   item.TournamentDate,
+			QueueState:       item.QueueState,
+			RetryCount:       item.RetryCount,
+			NextRetryAt:      item.NextRetryAt,
+			LastAttemptedAt:  item.LastAttemptedAt,
+			LastImportedAt:   item.LastImportedAt,
+			LastErrorClass:   item.LastErrorClass,
+			LastErrorMessage: item.LastErrorMessage,
+			CurrentAttemptID: item.CurrentAttemptID,
+			PlayerCount:      item.PlayerCount,
+			MatchCount:       item.MatchCount,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"state":       state,
+		"search":      search,
+		"tournaments": response,
+	})
+}
+
 func (a *app) getRankingPlayers(system string, startDate string, endDate string, minTournaments int, tournamentNameLike string) ([]map[string]interface{}, time.Time, error) {
 	cacheKey := strings.Join([]string{
 		system,
@@ -563,6 +715,18 @@ func writeError(w http.ResponseWriter, status int, err error) {
 	})
 }
 
+func openSyncRepo(dbPath string) (*synccore.Repository, error) {
+	repo, err := synccore.Open(dbPath, "")
+	if err != nil {
+		return nil, err
+	}
+	if err := synccore.ApplySchema(repo); err != nil {
+		_ = repo.Close()
+		return nil, err
+	}
+	return repo, nil
+}
+
 func openAppDB(dbPath string) (*sql.DB, error) {
 	query := url.Values{}
 	query.Set("_busy_timeout", "10000")
@@ -620,6 +784,21 @@ func cloneMap(input map[string]interface{}) map[string]interface{} {
 		cloned[key] = value
 	}
 	return cloned
+}
+
+func syncRunResponseFromRecord(item synccore.SyncRunSummary) syncRunResponse {
+	return syncRunResponse{
+		ID:              item.ID,
+		Mode:            item.Mode,
+		Status:          item.Status,
+		StartedAt:       item.StartedAt,
+		FinishedAt:      item.FinishedAt,
+		DiscoveredCount: item.DiscoveredCount,
+		ImportedCount:   item.ImportedCount,
+		FailedCount:     item.FailedCount,
+		SkippedCount:    item.SkippedCount,
+		Summary:         item.Summary,
+	}
 }
 
 func defaultDate(raw string, fallback time.Time) string {

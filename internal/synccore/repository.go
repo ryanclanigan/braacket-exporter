@@ -39,6 +39,44 @@ type Repository struct {
 	leagueSlug string
 }
 
+type SyncRunSummary struct {
+	ID              int
+	Mode            string
+	Status          string
+	StartedAt       string
+	FinishedAt      string
+	DiscoveredCount int
+	ImportedCount   int
+	FailedCount     int
+	SkippedCount    int
+	Summary         string
+}
+
+type QueueStateCount struct {
+	State string
+	Count int
+}
+
+type SyncTournamentSummary struct {
+	ID               int
+	BraacketID       string
+	URL              string
+	LeagueSlug       string
+	Name             string
+	DateText         string
+	TournamentDate   string
+	QueueState       string
+	RetryCount       int
+	NextRetryAt      string
+	LastAttemptedAt  string
+	LastImportedAt   string
+	LastErrorClass   string
+	LastErrorMessage string
+	CurrentAttemptID int
+	PlayerCount      int
+	MatchCount       int
+}
+
 func Open(dbPath string, leagueSlug string) (*Repository, error) {
 	dir := filepath.Dir(dbPath)
 	if dir != "." && dir != "" {
@@ -96,6 +134,169 @@ func (r *Repository) IncrementRunCounter(runID int, column string, amount int) e
 		runID,
 	)
 	return err
+}
+
+func (r *Repository) ListRecentRuns(limit int) ([]SyncRunSummary, error) {
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+	rows, err := r.db.Query(
+		`SELECT
+      id,
+      mode,
+      status,
+      started_at,
+      COALESCE(finished_at, ''),
+      discovered_count,
+      imported_count,
+      failed_count,
+      skipped_count,
+      COALESCE(summary, '')
+     FROM sync_runs
+     ORDER BY id DESC
+     LIMIT ?`,
+		limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	results := []SyncRunSummary{}
+	for rows.Next() {
+		var item SyncRunSummary
+		if err := rows.Scan(
+			&item.ID,
+			&item.Mode,
+			&item.Status,
+			&item.StartedAt,
+			&item.FinishedAt,
+			&item.DiscoveredCount,
+			&item.ImportedCount,
+			&item.FailedCount,
+			&item.SkippedCount,
+			&item.Summary,
+		); err != nil {
+			return nil, err
+		}
+		results = append(results, item)
+	}
+	return results, rows.Err()
+}
+
+func (r *Repository) ListQueueStateCounts() ([]QueueStateCount, error) {
+	rows, err := r.db.Query(
+		`SELECT queue_state, COUNT(*)
+     FROM tournaments
+     GROUP BY queue_state
+     ORDER BY queue_state`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	results := []QueueStateCount{}
+	for rows.Next() {
+		var item QueueStateCount
+		if err := rows.Scan(&item.State, &item.Count); err != nil {
+			return nil, err
+		}
+		results = append(results, item)
+	}
+	return results, rows.Err()
+}
+
+func (r *Repository) ListTournamentSummaries(queueState string, search string, limit int) ([]SyncTournamentSummary, error) {
+	if limit < 1 || limit > 200 {
+		limit = 50
+	}
+	searchPattern := "%"
+	if strings.TrimSpace(search) != "" {
+		searchPattern = "%" + strings.TrimSpace(search) + "%"
+	}
+
+	query := `SELECT
+      t.id,
+      t.braacket_id,
+      t.url,
+      t.league_slug,
+      COALESCE(t.name, ''),
+      COALESCE(t.date_text, ''),
+      COALESCE(t.tournament_date, ''),
+      t.queue_state,
+      t.retry_count,
+      COALESCE(t.next_retry_at, ''),
+      COALESCE(t.last_attempted_at, ''),
+      COALESCE(t.last_imported_at, ''),
+      COALESCE(t.last_error_class, ''),
+      COALESCE(t.last_error_message, ''),
+      COALESCE(t.current_attempt_id, 0),
+      (SELECT COUNT(*) FROM tournament_players tp WHERE tp.tournament_id = t.id) AS player_count,
+      (SELECT COUNT(*) FROM matches m WHERE m.tournament_id = t.id) AS match_count
+     FROM tournaments t
+     WHERE (? = '' OR t.queue_state = ?)
+       AND (
+         ? = '%'
+         OR t.braacket_id LIKE ?
+         OR t.url LIKE ?
+         OR COALESCE(t.name, '') LIKE ?
+       )
+     ORDER BY
+       CASE t.queue_state
+         WHEN 'in_progress' THEN 0
+         WHEN 'failed_retryable' THEN 1
+         WHEN 'failed_terminal' THEN 2
+         WHEN 'queued' THEN 3
+         WHEN 'discovered' THEN 4
+         WHEN 'imported' THEN 5
+         ELSE 6
+       END,
+       t.last_seen_at DESC,
+       t.id DESC
+     LIMIT ?`
+	rows, err := r.db.Query(
+		query,
+		queueState,
+		queueState,
+		searchPattern,
+		searchPattern,
+		searchPattern,
+		searchPattern,
+		limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	results := []SyncTournamentSummary{}
+	for rows.Next() {
+		var item SyncTournamentSummary
+		if err := rows.Scan(
+			&item.ID,
+			&item.BraacketID,
+			&item.URL,
+			&item.LeagueSlug,
+			&item.Name,
+			&item.DateText,
+			&item.TournamentDate,
+			&item.QueueState,
+			&item.RetryCount,
+			&item.NextRetryAt,
+			&item.LastAttemptedAt,
+			&item.LastImportedAt,
+			&item.LastErrorClass,
+			&item.LastErrorMessage,
+			&item.CurrentAttemptID,
+			&item.PlayerCount,
+			&item.MatchCount,
+		); err != nil {
+			return nil, err
+		}
+		results = append(results, item)
+	}
+	return results, rows.Err()
 }
 
 func (r *Repository) GetTournamentByID(id int) (*TournamentRecord, error) {
