@@ -414,6 +414,19 @@ VALUES
 	if !strings.Contains(detailBody, `"antiBotClass": "rate_limit"`) {
 		t.Fatalf("expected anti-bot class in tournament detail: %s", detailBody)
 	}
+
+	sourcePageRecorder := httptest.NewRecorder()
+	server.handleSyncSourcePageDetail(sourcePageRecorder, httptest.NewRequest(http.MethodGet, "/api/sync/source-page?id=41", nil))
+	if sourcePageRecorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", sourcePageRecorder.Code, sourcePageRecorder.Body.String())
+	}
+	sourceBody := sourcePageRecorder.Body.String()
+	if !strings.Contains(sourceBody, `"html": "\u003chtml\u003e\u003c/html\u003e"`) {
+		t.Fatalf("expected raw html in source page detail: %s", sourceBody)
+	}
+	if !strings.Contains(sourceBody, `"htmlPreview": "\u003chtml\u003e\u003c/html\u003e"`) {
+		t.Fatalf("expected html preview in source page detail: %s", sourceBody)
+	}
 }
 
 func TestSyncActionHandlers(t *testing.T) {

@@ -152,6 +152,12 @@ type syncSourcePageResponse struct {
 	ErrorMessage string `json:"errorMessage,omitempty"`
 }
 
+type syncSourcePageDetailResponse struct {
+	syncSourcePageResponse
+	HTML        string `json:"html"`
+	HTMLPreview string `json:"htmlPreview"`
+}
+
 type rankingCache struct {
 	mu    sync.RWMutex
 	items map[string]cachedRankingResult
@@ -190,6 +196,7 @@ func main() {
 	mux.HandleFunc("/api/sync/runs", server.handleSyncRuns)
 	mux.HandleFunc("/api/sync/tournaments", server.handleSyncTournaments)
 	mux.HandleFunc("/api/sync/tournament", server.handleSyncTournamentDetail)
+	mux.HandleFunc("/api/sync/source-page", server.handleSyncSourcePageDetail)
 	mux.HandleFunc("/api/sync/requeue", server.handleSyncRequeue)
 	mux.HandleFunc("/api/sync/reset", server.handleSyncReset)
 	mux.HandleFunc("/api/sync/import", server.handleSyncImport)
@@ -761,6 +768,49 @@ func (a *app) handleSyncTournamentDetail(w http.ResponseWriter, r *http.Request)
 	})
 }
 
+func (a *app) handleSyncSourcePageDetail(w http.ResponseWriter, r *http.Request) {
+	repo, err := openSyncRepo(a.dbPath)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	defer repo.Close()
+
+	sourcePageID := atoiSafe(r.URL.Query().Get("id"))
+	if sourcePageID < 1 {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("missing source page id"))
+		return
+	}
+
+	sourcePage, err := repo.GetSourcePageDetail(sourcePageID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusNotFound, err)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, syncSourcePageDetailResponse{
+		syncSourcePageResponse: syncSourcePageResponse{
+			ID:           sourcePage.ID,
+			RunID:        sourcePage.RunID,
+			TournamentID: sourcePage.TournamentID,
+			AttemptID:    sourcePage.AttemptID,
+			URL:          sourcePage.URL,
+			PageType:     sourcePage.PageType,
+			HTTPStatus:   sourcePage.HTTPStatus,
+			ContentHash:  sourcePage.ContentHash,
+			FetchedAt:    sourcePage.FetchedAt,
+			AntiBotClass: sourcePage.AntiBotClass,
+			ErrorMessage: sourcePage.ErrorMessage,
+		},
+		HTML:        sourcePage.HTML,
+		HTMLPreview: trimmedPreview(sourcePage.HTML, 4000),
+	})
+}
+
 func (a *app) handleSyncRequeue(w http.ResponseWriter, r *http.Request) {
 	a.handleSyncAction(w, r, "requeue", func(runner syncRunner, target string, force bool) error {
 		return runner.RequeueEvent(target)
@@ -1032,6 +1082,13 @@ func cloneMap(input map[string]interface{}) map[string]interface{} {
 		cloned[key] = value
 	}
 	return cloned
+}
+
+func trimmedPreview(value string, maxLen int) string {
+	if maxLen < 1 || len(value) <= maxLen {
+		return value
+	}
+	return value[:maxLen] + "\n...[truncated]"
 }
 
 type managedSyncRunner struct {

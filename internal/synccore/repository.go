@@ -107,6 +107,11 @@ type SourcePageSummary struct {
 	ErrorMessage string
 }
 
+type SourcePageDetail struct {
+	SourcePageSummary
+	HTML string
+}
+
 func Open(dbPath string, leagueSlug string) (*Repository, error) {
 	dir := filepath.Dir(dbPath)
 	if dir != "." && dir != "" {
@@ -451,6 +456,46 @@ func (r *Repository) ListTournamentSourcePages(tournamentID int, limit int) ([]S
 		results = append(results, item)
 	}
 	return results, rows.Err()
+}
+
+func (r *Repository) GetSourcePageDetail(sourcePageID int) (*SourcePageDetail, error) {
+	row := r.db.QueryRow(
+		`SELECT
+      id,
+      run_id,
+      COALESCE(tournament_id, 0),
+      COALESCE(attempt_id, 0),
+      url,
+      page_type,
+      COALESCE(http_status, 0),
+      COALESCE(content_hash, ''),
+      fetched_at,
+      COALESCE(anti_bot_class, ''),
+      COALESCE(error_message, ''),
+      COALESCE(html, '')
+     FROM source_pages
+     WHERE id = ?`,
+		sourcePageID,
+	)
+
+	var item SourcePageDetail
+	if err := row.Scan(
+		&item.ID,
+		&item.RunID,
+		&item.TournamentID,
+		&item.AttemptID,
+		&item.URL,
+		&item.PageType,
+		&item.HTTPStatus,
+		&item.ContentHash,
+		&item.FetchedAt,
+		&item.AntiBotClass,
+		&item.ErrorMessage,
+		&item.HTML,
+	); err != nil {
+		return nil, err
+	}
+	return &item, nil
 }
 
 func (r *Repository) GetTournamentByID(id int) (*TournamentRecord, error) {
