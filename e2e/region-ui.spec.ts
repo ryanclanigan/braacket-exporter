@@ -100,7 +100,10 @@ CREATE TABLE tournament_players (
   id INTEGER PRIMARY KEY,
   tournament_id INTEGER,
   attempt_id INTEGER,
-  canonical_player_id INTEGER
+  canonical_player_id INTEGER,
+  braacket_player_id TEXT,
+  braacket_league_player_id TEXT,
+  name TEXT
 );
 CREATE TABLE matches (
   id INTEGER PRIMARY KEY,
@@ -136,11 +139,24 @@ INSERT INTO players (
   id, canonical_name, braacket_league_player_id, braacket_player_id, name, first_seen_at, last_seen_at
 ) VALUES
   (363, 'league:lp-dial', 'lp-dial', 'bp-dial', 'Dial M', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
-  (2, 'league:lp-bob', 'lp-bob', 'bp-bob', 'Bob', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
-INSERT INTO tournament_players (id, tournament_id, attempt_id, canonical_player_id)
-VALUES (11, 1, 1, 363), (12, 1, 1, 2);
+  (2, 'league:lp-bob', 'lp-bob', 'bp-bob', 'Bob', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
+  (1001, 'league:l1', 'l1', 'tp1', 'Soda cup', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
+  (1002, 'league:l2', 'l2', 'tp2', 'Soda cup', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
+  (1003, 'league:l3', 'l3', 'tp3', 'Dial N', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
+  (1004, 'name:dial n', NULL, 'tp4', 'Dial N', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+INSERT INTO tournament_players (id, tournament_id, attempt_id, canonical_player_id, braacket_league_player_id, name)
+VALUES
+  (11, 1, 1, 363, 'lp-dial', 'Dial M'),
+  (12, 1, 1, 2, 'lp-bob', 'Bob'),
+  (21, 1, 1, 1001, 'l1', 'Soda cup'),
+  (22, 1, 1, 1002, 'l2', 'Soda cup'),
+  (23, 1, 1, 1003, 'l3', 'Dial N'),
+  (24, 1, 1, 1004, NULL, 'Dial N');
 INSERT INTO matches (id, tournament_id, attempt_id, match_key, player1_tournament_player_id, player2_tournament_player_id)
-VALUES (101, 1, 1, 'm1', 11, 12);
+VALUES
+  (101, 1, 1, 'm1', 11, 12),
+  (102, 1, 1, 'm2', 21, 22),
+      (103, 1, 1, 'm3', 23, 24);
 INSERT INTO source_pages (
   id, run_id, tournament_id, attempt_id, url, page_type, http_status, content_hash, fetched_at, anti_bot_class, error_message, html
 )
@@ -285,4 +301,25 @@ test("sync diagnostics UI shows queue state and recent tournament failures", asy
 
   await firstRow.locator('button[data-sync-action="import"]').click();
   await expect(page.locator("#sync-action-feedback")).toContainText("Imported T-RETRY.");
+});
+
+test("identity reconcile UI reports and repairs mixed and duplicate league identities", async ({ page }) => {
+  page.on("dialog", (dialog) => dialog.accept());
+
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await page.locator('a[href="#identity"]').click();
+
+  await expect(page.locator("#reconcile-multiple-groups")).toContainText("Soda cup");
+  await expect(page.locator("#reconcile-multiple-groups")).toContainText("league l1");
+  await expect(page.locator("#reconcile-multiple-groups")).toContainText("league l2");
+  await expect(page.locator("#reconcile-mixed-groups")).toContainText("Dial N");
+  await expect(page.locator("#reconcile-mixed-groups")).toContainText("name-only fallback row");
+
+  await page.locator('button[data-reconcile-action="fix-mixed-name-only"]').click();
+  await expect(page.locator("#reconcile-feedback")).toContainText("Updated dial n");
+  await expect(page.locator("#reconcile-mixed-groups")).toContainText("No groups found.");
+
+  await page.locator('button[data-reconcile-action="fix-multiple-league-ids"][data-keep-league-id="l1"]').click();
+  await expect(page.locator("#reconcile-feedback")).toContainText("Updated soda cup");
+  await expect(page.locator("#reconcile-multiple-groups")).toContainText("No groups found.");
 });
