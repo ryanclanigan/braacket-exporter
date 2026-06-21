@@ -199,6 +199,29 @@ test("region admin UI assigns and unassigns a player region", async ({ page }) =
 });
 
 test("sync diagnostics UI shows queue state and recent tournament failures", async ({ page }) => {
+  await page.route("**/api/sync/requeue", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ status: "ok", action: "requeue", target: "T-RETRY", force: false }),
+    });
+  });
+  await page.route("**/api/sync/reset", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ status: "ok", action: "reset", target: "T-RETRY", force: false }),
+    });
+  });
+  await page.route("**/api/sync/import", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ status: "ok", action: "import", target: "T-RETRY", force: true }),
+    });
+  });
+  page.on("dialog", (dialog) => dialog.accept());
+
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await page.locator('a[href="#sync"]').click();
 
@@ -215,4 +238,14 @@ test("sync diagnostics UI shows queue state and recent tournament failures", asy
   await expect(tournamentRows).toContainText("Arcadian Pools");
   await expect(tournamentRows).toContainText("HTTP 429");
   await expect(tournamentRows).toContainText("Rate Limit");
+
+  const firstRow = tournamentRows.locator("tr").first();
+  await firstRow.locator('button[data-sync-action="requeue"]').click();
+  await expect(page.locator("#sync-action-feedback")).toContainText("Requeued T-RETRY.");
+
+  await firstRow.locator('button[data-sync-action="reset"]').click();
+  await expect(page.locator("#sync-action-feedback")).toContainText("Reset T-RETRY.");
+
+  await firstRow.locator('button[data-sync-action="import"]').click();
+  await expect(page.locator("#sync-action-feedback")).toContainText("Imported T-RETRY.");
 });
