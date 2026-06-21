@@ -128,6 +128,10 @@ body {
   gap: 16px;
 }
 
+.sync-stats {
+  margin-top: 16px;
+}
+
 .stat-card {
   padding: 18px;
   border-radius: 20px;
@@ -199,6 +203,28 @@ button {
 
 .table-wrap {
   overflow-x: auto;
+}
+
+.sync-grid {
+  margin-top: 22px;
+  display: grid;
+  grid-template-columns: 0.9fr 1.3fr;
+  gap: 18px;
+}
+
+.sync-column {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
+
+.subsection-header {
+  display: grid;
+  gap: 4px;
+}
+
+.sync-filters {
+  grid-template-columns: 180px 1fr auto;
 }
 
 .pager {
@@ -299,6 +325,42 @@ th {
   color: var(--warn);
 }
 
+.state-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 0.76rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border: 1px solid var(--line);
+  background: rgba(31, 29, 25, 0.06);
+}
+
+.state-succeeded,
+.state-imported {
+  background: rgba(14, 107, 92, 0.12);
+  color: var(--accent-strong);
+}
+
+.state-running,
+.state-in_progress {
+  background: rgba(20, 72, 126, 0.12);
+  color: #14487e;
+}
+
+.state-failed_retryable,
+.state-failed_terminal {
+  background: rgba(153, 96, 20, 0.14);
+  color: var(--warn);
+}
+
+.state-queued,
+.state-discovered {
+  background: rgba(95, 86, 72, 0.12);
+  color: var(--ink-soft);
+}
+
 @media (max-width: 1100px) {
   .page-shell {
     grid-template-columns: 1fr;
@@ -314,6 +376,10 @@ th {
   }
 
   .region-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .sync-grid {
     grid-template-columns: 1fr;
   }
 }
@@ -336,7 +402,8 @@ th {
 
   .stats-grid,
   .filters,
-  .filters.compact {
+  .filters.compact,
+  .sync-filters {
     grid-template-columns: 1fr;
   }
 }

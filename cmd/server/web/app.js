@@ -1,4 +1,8 @@
 const overviewCards = document.querySelector("#overview-cards");
+const syncSummary = document.querySelector("#sync-summary");
+const syncStateCards = document.querySelector("#sync-state-cards");
+const syncRunRows = document.querySelector("#sync-run-rows");
+const syncTournamentRows = document.querySelector("#sync-tournament-rows");
 const rankingMeta = document.querySelector("#ranking-meta");
 const rankingRows = document.querySelector("#ranking-rows");
 const playerResults = document.querySelector("#player-results");
@@ -6,10 +10,12 @@ const regionSearchResults = document.querySelector("#region-search-results");
 const regionList = document.querySelector("#region-list");
 const regionFeedback = document.querySelector("#region-feedback");
 const rankingForm = document.querySelector("#ranking-form");
+const syncFilterForm = document.querySelector("#sync-filter-form");
 const playerForm = document.querySelector("#player-form");
 const regionSearchForm = document.querySelector("#region-search-form");
 const regionAssignForm = document.querySelector("#region-assign-form");
 const refreshOverviewButton = document.querySelector("#refresh-overview");
+const refreshSyncButton = document.querySelector("#refresh-sync");
 const previousPageButton = document.querySelector("#previous-page");
 const nextPageButton = document.querySelector("#next-page");
 const rankingPageMeta = document.querySelector("#ranking-page-meta");
@@ -50,6 +56,99 @@ function renderOverview(data) {
       `
     )
     .join("");
+}
+
+function renderSyncSummary(data) {
+  const queueStates = Array.isArray(data.queueStates) ? data.queueStates : [];
+  const latestRun = data.latestRun;
+  syncSummary.innerHTML = latestRun
+    ? `
+      <strong>Latest run:</strong> ${escapeHTML(latestRun.mode)} is <strong>${escapeHTML(latestRun.status)}</strong>.
+      Started ${formatDateTime(latestRun.startedAt)}${latestRun.finishedAt ? ` and finished ${formatDateTime(latestRun.finishedAt)}` : ""}.
+      ${latestRun.summary ? `<span class="muted">${escapeHTML(latestRun.summary)}</span>` : ""}
+    `
+    : "No sync runs recorded yet.";
+
+  syncStateCards.innerHTML = [
+    ["Total Tracked", String(data.total ?? 0), "all tournament records"],
+    ...queueStates.map((item) => [humanizeState(item.state), String(item.count ?? 0), item.state]),
+  ]
+    .map(
+      ([label, value, detail]) => `
+        <article class="stat-card">
+          <span>${label}</span>
+          <strong>${value}</strong>
+          <div class="muted">${detail}</div>
+        </article>
+      `
+    )
+    .join("");
+}
+
+function renderSyncRuns(data) {
+  const runs = Array.isArray(data.runs) ? data.runs : [];
+  syncRunRows.innerHTML = runs.length
+    ? runs
+        .map(
+          (run) => `
+            <tr>
+              <td>
+                <strong>#${run.id}</strong>
+                <div class="muted">${escapeHTML(run.mode)}</div>
+              </td>
+              <td><span class="state-pill state-${run.status}">${humanizeState(run.status)}</span></td>
+              <td>
+                ${formatDateTime(run.startedAt)}
+                <div class="muted">${run.finishedAt ? `finished ${formatDateTime(run.finishedAt)}` : "still running"}</div>
+              </td>
+              <td class="muted">
+                discovered ${run.discoveredCount} <br />
+                imported ${run.importedCount} <br />
+                failed ${run.failedCount} <br />
+                skipped ${run.skippedCount}
+                ${run.summary ? `<div>${escapeHTML(run.summary)}</div>` : ""}
+              </td>
+            </tr>
+          `
+        )
+        .join("")
+    : `<tr><td colspan="4" class="muted">No sync runs recorded yet.</td></tr>`;
+}
+
+function renderSyncTournaments(data) {
+  const tournaments = Array.isArray(data.tournaments) ? data.tournaments : [];
+  syncTournamentRows.innerHTML = tournaments.length
+    ? tournaments
+        .map(
+          (tournament) => `
+            <tr>
+              <td>
+                <strong>${escapeHTML(tournament.name || tournament.braacketId)}</strong>
+                <div class="muted">${tournament.braacketId}</div>
+                <div class="muted">${tournament.tournamentDate || tournament.dateText || "No date parsed"}</div>
+              </td>
+              <td>
+                <span class="state-pill state-${tournament.queueState}">${humanizeState(tournament.queueState)}</span>
+                <div class="muted">${tournament.currentAttemptId ? `attempt #${tournament.currentAttemptId}` : "idle"}</div>
+              </td>
+              <td class="muted">
+                count ${tournament.retryCount}
+                <div>${tournament.nextRetryAt ? `next ${formatDateTime(tournament.nextRetryAt)}` : "no retry scheduled"}</div>
+              </td>
+              <td class="muted">
+                ${tournament.playerCount} players
+                <div>${tournament.matchCount} matches</div>
+              </td>
+              <td class="muted">
+                ${tournament.lastErrorClass ? `<strong>${escapeHTML(humanizeState(tournament.lastErrorClass))}</strong><br />` : ""}
+                ${tournament.lastErrorMessage ? `${escapeHTML(tournament.lastErrorMessage)}<br />` : "No error recorded"}
+                ${tournament.lastAttemptedAt ? `<span>attempted ${formatDateTime(tournament.lastAttemptedAt)}</span>` : ""}
+              </td>
+            </tr>
+          `
+        )
+        .join("")
+    : `<tr><td colspan="5" class="muted">No tournaments matched this filter.</td></tr>`;
 }
 
 function renderRankingResponse(data) {
@@ -168,6 +267,38 @@ async function loadOverview() {
   renderOverview(data);
 }
 
+async function loadSyncSummary() {
+  syncSummary.textContent = "Loading sync status...";
+  syncStateCards.innerHTML = "";
+  const response = await fetch("/api/sync/summary");
+  const data = await response.json();
+  renderSyncSummary(data);
+}
+
+async function loadSyncRuns() {
+  syncRunRows.innerHTML = `<tr><td colspan="4" class="muted">Loading runs...</td></tr>`;
+  const response = await fetch("/api/sync/runs?limit=8");
+  const data = await response.json();
+  renderSyncRuns(data);
+}
+
+async function loadSyncTournaments() {
+  syncTournamentRows.innerHTML = `<tr><td colspan="5" class="muted">Loading tournaments...</td></tr>`;
+  const params = new URLSearchParams(new FormData(syncFilterForm));
+  params.set("limit", "25");
+  const response = await fetch(`/api/sync/tournaments?${params.toString()}`);
+  const data = await response.json();
+  renderSyncTournaments(data);
+}
+
+async function loadSyncDiagnostics() {
+  try {
+    await Promise.all([loadSyncSummary(), loadSyncRuns(), loadSyncTournaments()]);
+  } catch (error) {
+    syncSummary.textContent = error instanceof Error ? error.message : String(error);
+  }
+}
+
 async function loadRankings() {
   rankingMeta.textContent = "Loading rankings...";
   rankingPageMeta.textContent = "";
@@ -237,6 +368,11 @@ rankingForm.addEventListener("submit", (event) => {
   void loadRankings();
 });
 
+syncFilterForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void loadSyncTournaments();
+});
+
 playerForm.addEventListener("submit", (event) => {
   event.preventDefault();
   void loadPlayers();
@@ -292,6 +428,10 @@ refreshOverviewButton.addEventListener("click", () => {
   void loadOverview();
 });
 
+refreshSyncButton.addEventListener("click", () => {
+  void loadSyncDiagnostics();
+});
+
 previousPageButton.addEventListener("click", () => {
   rankingState.offset = Math.max(0, rankingState.offset - rankingState.limit);
   void loadRankings();
@@ -302,8 +442,35 @@ nextPageButton.addEventListener("click", () => {
   void loadRankings();
 });
 
+function humanizeState(value) {
+  return String(value || "")
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function formatDateTime(value) {
+  if (!value) {
+    return "Unknown";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return `${date.toLocaleDateString()} ${date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+}
+
+function escapeHTML(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
 setDefaultFilters();
 void loadOverview();
+void loadSyncDiagnostics();
 void loadRankings();
 void loadPlayers();
 void loadRegionSearch();
