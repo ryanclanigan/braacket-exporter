@@ -340,3 +340,23 @@ test("identity reconcile UI reports and repairs mixed and duplicate league ident
   await expect(page.locator("#reconcile-feedback")).toContainText("Updated soda cup");
   await expect(page.locator("#reconcile-multiple-groups")).toContainText("No groups found.");
 });
+
+test("rankings UI shows expandable head-to-head details", async ({ page }) => {
+  await page.goto(serverURL, { waitUntil: "domcontentloaded" });
+  await page.locator('a[href="#rankings"]').click();
+  await page.locator('#ranking-form input[name="minTournaments"]').fill("1");
+  await page.locator('#ranking-form button[type="submit"]').click();
+
+  await expect(page.locator("#ranking-rows")).toContainText("Dial M");
+  const firstToggle = page.locator(".ranking-detail-toggle").first();
+  await firstToggle.click();
+
+  const detailRow = page.locator(".ranking-detail-row").first();
+  await expect(detailRow).toBeVisible();
+  await expect(detailRow).toContainText("Head To Head");
+  await expect(detailRow).toContainText("Bob");
+  await expect(detailRow).toContainText("1 - 0");
+
+  await detailRow.locator('[data-ranking-sort="record"]').click();
+  await expect(detailRow).toContainText("Record");
+});

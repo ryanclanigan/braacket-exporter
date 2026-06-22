@@ -411,6 +411,71 @@ th {
   letter-spacing: 0.12em;
 }
 
+.ranking-actions-cell {
+  width: 120px;
+}
+
+.ranking-detail-row td {
+  padding-top: 0;
+  background: rgba(255, 250, 240, 0.45);
+}
+
+.ranking-h2h-panel {
+  display: grid;
+  gap: 12px;
+  padding: 14px 4px 4px;
+}
+
+.ranking-h2h-toolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.ranking-h2h-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ranking-h2h-list {
+  display: grid;
+  gap: 8px;
+}
+
+.ranking-h2h-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: var(--h2h-bg, var(--panel-strong));
+}
+
+.ranking-h2h-score {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  font-weight: 700;
+}
+
+.ranking-h2h-score .wins {
+  color: #0b7a35;
+}
+
+.ranking-h2h-score .losses {
+  color: #a61b1b;
+}
+
+.ranking-h2h-opponent {
+  display: grid;
+  justify-items: end;
+  text-align: right;
+}
+
 .player-list {
   display: grid;
   gap: 12px;

@@ -86,13 +86,14 @@
             <div class="table-wrap">
               <table>
                 <thead>
-                  <tr>
-                    <th>Rank</th>
-                    <th>Player</th>
-                    <th>Score</th>
-                    <th>Strength</th>
-                    <th>Top Wins</th>
-                  </tr>
+                <tr>
+                  <th>Rank</th>
+                  <th>Player</th>
+                  <th>Score</th>
+                  <th>Strength</th>
+                  <th>Top Wins</th>
+                  <th></th>
+                </tr>
                 </thead>
                 <tbody id="ranking-rows"></tbody>
               </table>
@@ -356,6 +357,7 @@
       const previousPageButton = document.querySelector("#previous-page");
       const nextPageButton = document.querySelector("#next-page");
       const rankingPageMeta = document.querySelector("#ranking-page-meta");
+      const rankingDetailState = new Map();
 
       const rankingState = {
         limit: 50,
@@ -685,18 +687,117 @@
                   .map((record) => `${record.opponent} (${record.wins}-${record.losses})`)
                   .join(", ")
               : "";
+            const playerKey = String(player.name || player.rank || "");
+            const detailState = rankingDetailState.get(playerKey) || { open: false, sort: "rank", desc: false };
+            const detailHTML = renderH2HDetail(player.records, detailState);
 
             return `
-              <tr>
+              <tr class="ranking-row">
                 <td>${player.rank ?? player.colley_rank ?? player.elo_rank ?? player.braacket_rank ?? "n/a"}</td>
                 <td>${player.name}</td>
                 <td>${score}</td>
                 <td>${strength}</td>
                 <td class="muted">${opponents || "No wins on ranked opponents shown"}</td>
+                <td class="ranking-actions-cell">
+                  <button
+                    class="button-secondary ranking-detail-toggle"
+                    type="button"
+                    data-ranking-player="${escapeHTML(playerKey)}"
+                    aria-expanded="${detailState.open ? "true" : "false"}"
+                  >
+                    ${detailState.open ? "Hide H2H" : "Show H2H"}
+                  </button>
+                </td>
+              </tr>
+              <tr class="ranking-detail-row ${detailState.open ? "is-open" : ""}" ${detailState.open ? "" : "hidden"}>
+                <td colspan="6">
+                  ${detailHTML}
+                </td>
               </tr>
             `;
           })
           .join("");
+      }
+
+      function renderH2HDetail(records, detailState) {
+        const normalized = Array.isArray(records) ? records.map((record) => ({
+          opponent: String(record.opponent || "Unknown"),
+          wins: Number(record.wins || 0),
+          losses: Number(record.losses || 0),
+          opponentRank: Number(record.opponentRank || 0),
+        })) : [];
+
+        const sorted = [...normalized].sort((left, right) => {
+          const leftMetric = detailState.sort === "record"
+            ? (1 + left.wins) / (2 + left.wins + left.losses)
+            : left.opponentRank || Number.MAX_SAFE_INTEGER;
+          const rightMetric = detailState.sort === "record"
+            ? (1 + right.wins) / (2 + right.wins + right.losses)
+            : right.opponentRank || Number.MAX_SAFE_INTEGER;
+          if (leftMetric !== rightMetric) {
+            return detailState.desc ? rightMetric - leftMetric : leftMetric - rightMetric;
+          }
+          return left.opponent.localeCompare(right.opponent);
+        });
+
+        if (sorted.length === 0) {
+          return `<div class="ranking-h2h-panel"><div class="muted">No head-to-head records available for this player.</div></div>`;
+        }
+
+        return `
+          <div class="ranking-h2h-panel">
+            <div class="ranking-h2h-toolbar">
+              <div class="eyebrow">Head To Head</div>
+              <div class="ranking-h2h-actions">
+                <button
+                  class="button-tertiary ranking-sort-toggle"
+                  type="button"
+                  data-ranking-sort="rank"
+                >
+                  Opponent Rank${detailState.sort === "rank" ? (detailState.desc ? " ↓" : " ↑") : ""}
+                </button>
+                <button
+                  class="button-tertiary ranking-sort-toggle"
+                  type="button"
+                  data-ranking-sort="record"
+                >
+                  Record${detailState.sort === "record" ? (detailState.desc ? " ↓" : " ↑") : ""}
+                </button>
+              </div>
+            </div>
+            <div class="ranking-h2h-list">
+              ${sorted.map((record) => `
+                <div class="ranking-h2h-item" style="--h2h-bg: ${recordColor(record)}">
+                  <div class="ranking-h2h-score">
+                    <span class="wins">${record.wins}</span>
+                    <span class="muted">-</span>
+                    <span class="losses">${record.losses}</span>
+                  </div>
+                  <div class="ranking-h2h-opponent">
+                    <span class="muted">${record.opponentRank > 0 ? `#${record.opponentRank}` : "Unranked"}</span>
+                    <strong>${escapeHTML(record.opponent)}</strong>
+                  </div>
+                </div>
+              `).join("")}
+            </div>
+          </div>
+        `;
+      }
+
+      function recordColor(record) {
+        const denominator = 2 + record.wins + record.losses;
+        const score = denominator > 0 ? (1 + record.wins) / denominator : 0.5;
+        if (score >= 0.5) {
+          return interpolateColor("FEF9C3", "16A34A", (score - 0.5) * 2);
+        }
+        return interpolateColor("DC2626", "FEF9C3", score * 2);
+      }
+
+      function interpolateColor(startHex, endHex, fraction) {
+        const start = startHex.match(/.{1,2}/g).map((octet) => parseInt(octet, 16) * (1 - fraction));
+        const end = endHex.match(/.{1,2}/g).map((octet) => parseInt(octet, 16) * fraction);
+        const mixed = [0, 1, 2].map((index) => Math.min(Math.round(start[index] + end[index]), 255));
+        return "#" + mixed.map((value) => value.toString(16).padStart(2, "0")).join("");
       }
 
       function renderPlayers(data) {
@@ -1164,6 +1265,38 @@
 
       nextPageButton.addEventListener("click", () => {
         rankingState.offset += rankingState.limit;
+        void loadRankings();
+      });
+
+      rankingRows.addEventListener("click", (event) => {
+        const detailButton = event.target.closest(".ranking-detail-toggle");
+        if (detailButton) {
+          const playerKey = detailButton.dataset.rankingPlayer;
+          if (!playerKey) {
+            return;
+          }
+          const state = rankingDetailState.get(playerKey) || { open: false, sort: "rank", desc: false };
+          rankingDetailState.set(playerKey, { ...state, open: !state.open });
+          void loadRankings();
+          return;
+        }
+
+        const sortButton = event.target.closest(".ranking-sort-toggle");
+        if (!sortButton) {
+          return;
+        }
+        const detailRow = sortButton.closest(".ranking-detail-row");
+        const rankingRow = detailRow?.previousElementSibling;
+        const playerKey = rankingRow?.querySelector(".ranking-detail-toggle")?.dataset.rankingPlayer;
+        const sortName = sortButton.dataset.rankingSort;
+        if (!playerKey || !sortName) {
+          return;
+        }
+        const state = rankingDetailState.get(playerKey) || { open: true, sort: "rank", desc: false };
+        const nextState = sortName === state.sort
+          ? { ...state, open: true, desc: !state.desc }
+          : { ...state, open: true, sort: sortName, desc: sortName === "record" };
+        rankingDetailState.set(playerKey, nextState);
         void loadRankings();
       });
 
