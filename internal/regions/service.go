@@ -14,11 +14,11 @@ type Region struct {
 }
 
 type PlayerSummary struct {
-	CanonicalPlayerID       int
-	Name                    string
-	BraacketLeaguePlayerID  sql.NullString
-	RegionSlug              sql.NullString
-	RegionName              sql.NullString
+	CanonicalPlayerID      int
+	Name                   string
+	BraacketLeaguePlayerID sql.NullString
+	RegionSlug             sql.NullString
+	RegionName             sql.NullString
 }
 
 type Service struct {
@@ -217,6 +217,15 @@ ON CONFLICT(canonical_player_id) DO UPDATE SET
 
 func (s *Service) RemovePlayerRegion(canonicalPlayerID int) error {
 	_, err := s.db.Exec(`DELETE FROM player_region_assignments WHERE canonical_player_id = ?`, canonicalPlayerID)
+	return err
+}
+
+func (s *Service) DeleteRegion(regionSlug string) error {
+	normalized := normalizeSlug(regionSlug)
+	if normalized == "" {
+		return fmt.Errorf("region slug is required")
+	}
+	_, err := s.db.Exec(`DELETE FROM regions WHERE slug = ?`, normalized)
 	return err
 }
 

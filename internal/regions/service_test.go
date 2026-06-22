@@ -62,6 +62,45 @@ VALUES
 	}
 }
 
+func TestDeleteRegionRemovesAssignments(t *testing.T) {
+	db := openTestDB(t)
+	service := NewService(db)
+
+	mustExec(t, db, `
+INSERT INTO players (id, canonical_name, braacket_league_player_id, name, first_seen_at, last_seen_at)
+VALUES
+  (1, 'league:lp1', 'lp1', 'Alice', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
+  (2, 'league:lp2', 'lp2', 'Bob', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')
+`)
+
+	if err := service.AssignPlayerRegion(1, "front-range", "Front Range", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.AssignPlayerRegion(2, "front-range", "Front Range", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := service.DeleteRegion("front-range"); err != nil {
+		t.Fatal(err)
+	}
+
+	regions, err := service.ListRegions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(regions) != 0 {
+		t.Fatalf("expected region list to be empty, got %#v", regions)
+	}
+
+	players, err := service.SearchPlayers("Ali", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(players) != 1 || players[0].RegionSlug.Valid {
+		t.Fatalf("expected player mapping to be removed, got %#v", players)
+	}
+}
+
 func openTestDB(t *testing.T) *sql.DB {
 	t.Helper()
 	db, err := sql.Open("sqlite3", filepath.Join(t.TempDir(), "regions.sqlite"))

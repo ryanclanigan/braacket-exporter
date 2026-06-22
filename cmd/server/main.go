@@ -6,6 +6,7 @@ import (
 	"braacketreplacement/internal/reconcile"
 	"braacketreplacement/internal/regions"
 	"braacketreplacement/internal/synccore"
+	"braacketreplacement/internal/trueskill"
 	"database/sql"
 	"embed"
 	"encoding/json"
@@ -214,6 +215,7 @@ func main() {
 	mux.HandleFunc("/api/regions", server.handleRegions)
 	mux.HandleFunc("/api/regions/assign", server.handleAssignRegion)
 	mux.HandleFunc("/api/regions/unassign", server.handleUnassignRegion)
+	mux.HandleFunc("/api/regions/delete", server.handleDeleteRegion)
 	mux.HandleFunc("/api/rankings", server.handleRankings)
 	mux.HandleFunc("/api/sync/summary", server.handleSyncSummary)
 	mux.HandleFunc("/api/sync/runs", server.handleSyncRuns)
@@ -496,6 +498,39 @@ func (a *app) handleUnassignRegion(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (a *app) handleDeleteRegion(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, fmt.Errorf("method not allowed"))
+		return
+	}
+	var request struct {
+		Region string `json:"region"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	db, err := openAppDB(a.dbPath)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	defer db.Close()
+	if err := regions.ApplySchema(db); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	service := regions.NewService(db)
+	if err := service.DeleteRegion(request.Region); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": "ok",
+		"region": request.Region,
+	})
+}
+
 func (a *app) handleRankings(w http.ResponseWriter, r *http.Request) {
 	values := r.URL.Query()
 	system := strings.ToLower(strings.TrimSpace(values.Get("system")))
@@ -520,36 +555,11 @@ func (a *app) handleRankings(w http.ResponseWriter, r *http.Request) {
 	}
 	includeRecords := parseBoolFlag(values.Get("includeRecords"))
 
-	if system != "colley" {
-		if system == "elo" {
-			fullPlayers, generatedAt, err := a.getRankingPlayers(system, startDate, endDate, minTournaments, nameLike)
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, err)
-				return
-			}
-			totalPlayers := len(fullPlayers)
-			page := paginatePlayers(fullPlayers, offset, limit, includeRecords)
-			writeJSON(w, http.StatusOK, rankingResponse{
-				System:             system,
-				Status:             "ready",
-				StartDate:          startDate,
-				EndDate:            endDate,
-				MinTournaments:     minTournaments,
-				TournamentNameLike: nameLike,
-				Limit:              limit,
-				Offset:             offset,
-				ReturnedPlayers:    len(page),
-				TotalPlayers:       totalPlayers,
-				IncludeRecords:     includeRecords,
-				GeneratedAt:        generatedAt.Format(time.RFC3339),
-				Players:            page,
-			})
-			return
-		}
+	if system != "colley" && system != "elo" && system != "trueskill" {
 		writeJSON(w, http.StatusNotImplemented, rankingResponse{
 			System:             system,
 			Status:             "planned",
-			Message:            "This ranking system is part of the rewrite target but is not implemented yet. Colley is wired through today; Elo and TrueSkill need native server-side implementations.",
+			Message:            "Unsupported ranking system. Available systems today are Colley, Elo, and TrueSkill.",
 			StartDate:          startDate,
 			EndDate:            endDate,
 			MinTournaments:     minTournaments,
@@ -962,6 +972,8 @@ func (a *app) getRankingPlayers(system string, startDate string, endDate string,
 		players, err = colley.ComputeExport(a.dbPath, startDate, endDate, minTournaments, tournamentNameLike)
 	case "elo":
 		players, err = elo.ComputeExport(a.dbPath, startDate, endDate, minTournaments, tournamentNameLike)
+	case "trueskill":
+		players, err = trueskill.ComputeExport(a.dbPath, startDate, endDate, minTournaments, tournamentNameLike)
 	default:
 		return nil, time.Time{}, fmt.Errorf("unsupported ranking system: %s", system)
 	}

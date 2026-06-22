@@ -3,6 +3,7 @@ package main
 import (
 	"braacketreplacement/internal/colley"
 	"braacketreplacement/internal/elo"
+	"braacketreplacement/internal/trueskill"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -15,6 +16,7 @@ import (
 const usageText = `Usage:
   go run ./cmd/rank colley --start-date <YYYY-MM-DD> --end-date <YYYY-MM-DD> --min-tournaments <n> [--tournament-name-like <substring>] [--export <path>]
   go run ./cmd/rank elo --start-date <YYYY-MM-DD> --end-date <YYYY-MM-DD> --min-tournaments <n> [--tournament-name-like <substring>] [--export <path>]
+  go run ./cmd/rank trueskill --start-date <YYYY-MM-DD> --end-date <YYYY-MM-DD> --min-tournaments <n> [--tournament-name-like <substring>] [--export <path>]
 
 Environment:
   BRAACKET_DB_PATH  SQLite database path (default: ./data/braacket.sqlite)
@@ -42,6 +44,8 @@ func main() {
 		players, err = colley.ComputeExport(config.dbPath, config.startDate, config.endDate, config.minimumTournaments, config.tournamentNameLike)
 	case "elo":
 		players, err = elo.ComputeExport(config.dbPath, config.startDate, config.endDate, config.minimumTournaments, config.tournamentNameLike)
+	case "trueskill":
+		players, err = trueskill.ComputeExport(config.dbPath, config.startDate, config.endDate, config.minimumTournaments, config.tournamentNameLike)
 	default:
 		err = fmt.Errorf("unsupported ranking system: %s", config.system)
 	}
@@ -103,7 +107,7 @@ func parseArgs(args []string) (cliConfig, error) {
 			}
 		}
 	}
-	if config.system != "colley" && config.system != "elo" {
+	if config.system != "colley" && config.system != "elo" && config.system != "trueskill" {
 		return cliConfig{}, fmt.Errorf(usageText)
 	}
 	if config.startDate == "" || config.endDate == "" || config.minimumTournaments < 1 {

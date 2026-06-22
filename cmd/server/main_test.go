@@ -81,10 +81,10 @@ VALUES (101, 11, 12);
 	}
 }
 
-func TestHandleRankingsPlannedSystems(t *testing.T) {
+func TestHandleRankingsUnsupportedSystem(t *testing.T) {
 	server := &app{}
 
-	request := httptest.NewRequest(http.MethodGet, "/api/rankings?system=trueskill", nil)
+	request := httptest.NewRequest(http.MethodGet, "/api/rankings?system=glicko", nil)
 	recorder := httptest.NewRecorder()
 	server.handleRankings(recorder, request)
 	if recorder.Code != http.StatusNotImplemented {
@@ -167,6 +167,81 @@ VALUES
 	}
 }
 
+func TestHandleRankingsTrueSkillSystem(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "trueskill.sqlite")
+	setupSQLiteFixture(t, dbPath, `
+CREATE TABLE tournaments (
+  id INTEGER PRIMARY KEY,
+  league_slug TEXT,
+  name TEXT,
+  tournament_date TEXT,
+  queue_state TEXT
+);
+CREATE TABLE players (
+  id INTEGER PRIMARY KEY,
+  canonical_name TEXT,
+  braacket_league_player_id TEXT,
+  name TEXT,
+  first_seen_at TEXT,
+  last_seen_at TEXT
+);
+CREATE TABLE tournament_players (
+  id INTEGER PRIMARY KEY,
+  tournament_id INTEGER,
+  canonical_player_id INTEGER,
+  name TEXT
+);
+CREATE TABLE matches (
+  id INTEGER PRIMARY KEY,
+  tournament_id INTEGER,
+  player1_tournament_player_id INTEGER,
+  player2_tournament_player_id INTEGER,
+  winner_tournament_player_id INTEGER,
+  player1_score INTEGER,
+  player2_score INTEGER
+);
+INSERT INTO tournaments (id, league_slug, name, tournament_date, queue_state)
+VALUES
+  (1, 'comelee', 'Weekly Wednesday #1', '2026-01-10', 'imported'),
+  (2, 'comelee', 'Weekly Wednesday #2', '2026-01-24', 'imported');
+INSERT INTO players (id, canonical_name, name, first_seen_at, last_seen_at)
+VALUES
+  (1, 'name:alice', 'Alice', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
+  (2, 'name:bob', 'Bob', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+INSERT INTO tournament_players (id, tournament_id, canonical_player_id, name)
+VALUES
+  (11, 1, 1, 'Alice'),
+  (12, 1, 2, 'Bob'),
+  (21, 2, 1, 'ALICE!'),
+  (22, 2, 2, 'Bob');
+INSERT INTO matches (id, tournament_id, player1_tournament_player_id, player2_tournament_player_id, winner_tournament_player_id, player1_score, player2_score)
+VALUES
+  (101, 1, 11, 12, 11, 3, 1),
+  (102, 2, 21, 22, 21, 3, 0);
+`)
+
+	server := &app{
+		dbPath: dbPath,
+		cache:  rankingCache{items: map[string]cachedRankingResult{}},
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/api/rankings?system=trueskill&startDate=2026-01-01&endDate=2026-01-31&minTournaments=2&limit=10", nil)
+	recorder := httptest.NewRecorder()
+	server.handleRankings(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), `"system": "trueskill"`) {
+		t.Fatalf("expected trueskill response: %s", recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), `"status": "ready"`) {
+		t.Fatalf("expected ready trueskill response: %s", recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), `"trueskill_mu"`) {
+		t.Fatalf("expected trueskill details in response: %s", recorder.Body.String())
+	}
+}
+
 func TestRegionAPIHandlers(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "regions.sqlite")
 	setupSQLiteFixture(t, dbPath, `
@@ -228,6 +303,28 @@ VALUES
 	server.handleUnassignRegion(unassignRecorder, unassignRequest)
 	if unassignRecorder.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", unassignRecorder.Code, unassignRecorder.Body.String())
+	}
+
+	assignRequest = httptest.NewRequest(http.MethodPost, "/api/regions/assign", strings.NewReader(`{"playerId":2,"region":"south","name":"South"}`))
+	assignRequest.Header.Set("Content-Type", "application/json")
+	assignRecorder = httptest.NewRecorder()
+	server.handleAssignRegion(assignRecorder, assignRequest)
+	if assignRecorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", assignRecorder.Code, assignRecorder.Body.String())
+	}
+
+	deleteRequest := httptest.NewRequest(http.MethodPost, "/api/regions/delete", strings.NewReader(`{"region":"south"}`))
+	deleteRequest.Header.Set("Content-Type", "application/json")
+	deleteRecorder := httptest.NewRecorder()
+	server.handleDeleteRegion(deleteRecorder, deleteRequest)
+	if deleteRecorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", deleteRecorder.Code, deleteRecorder.Body.String())
+	}
+
+	listRecorder = httptest.NewRecorder()
+	server.handleRegions(listRecorder, httptest.NewRequest(http.MethodGet, "/api/regions", nil))
+	if strings.Contains(listRecorder.Body.String(), `"slug": "south"`) {
+		t.Fatalf("expected south to be deleted: %s", listRecorder.Body.String())
 	}
 }
 
