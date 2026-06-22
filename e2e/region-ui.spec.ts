@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 
 const serverAddress = "127.0.0.1:8193";
+const serverURL = `http://${serverAddress}`;
 let tempDir = "";
 let dbPath = "";
 let server: ChildProcessWithoutNullStreams | null = null;
@@ -188,7 +189,7 @@ test.beforeAll(async () => {
   });
 
   try {
-    await waitForServer(`http://${serverAddress}/api/health`, 30_000);
+    await waitForServer(`${serverURL}/api/health`, 30_000);
   } catch (error) {
     server.kill("SIGINT");
     throw new Error(`Server failed to start. ${stderr}\n${String(error)}`);
@@ -205,7 +206,7 @@ test.afterAll(() => {
 });
 
 test("region admin UI assigns and unassigns a player region", async ({ page }) => {
-  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await page.goto(serverURL, { waitUntil: "domcontentloaded" });
   await expect(page.locator("#region-search-form")).toBeVisible();
 
   await page.locator('a[href="#regions"]').click();
@@ -264,7 +265,7 @@ test("sync diagnostics UI shows queue state and recent tournament failures", asy
   });
   page.on("dialog", (dialog) => dialog.accept());
 
-  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await page.goto(serverURL, { waitUntil: "domcontentloaded" });
   await page.locator('a[href="#sync"]').click();
 
   await expect(page.locator("#sync-summary")).toContainText("Latest run:");
@@ -306,7 +307,7 @@ test("sync diagnostics UI shows queue state and recent tournament failures", asy
 test("identity reconcile UI reports and repairs mixed and duplicate league identities", async ({ page }) => {
   page.on("dialog", (dialog) => dialog.accept());
 
-  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await page.goto(serverURL, { waitUntil: "domcontentloaded" });
   await page.locator('a[href="#identity"]').click();
 
   await expect(page.locator("#reconcile-multiple-groups")).toContainText("Soda cup");
