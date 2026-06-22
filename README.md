@@ -47,7 +47,7 @@ go run ./cmd/sync discover --league another-league
 
 ### `go run ./cmd/server`
 
-Starts the LeagueRank UI and JSON API on `:8080` by default.
+Starts the new replacement UI and JSON API on `:8080` by default.
 
 Environment:
 

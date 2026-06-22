@@ -230,7 +230,7 @@ func main() {
 	mux.HandleFunc("/api/reconcile/fix-multiple-league-ids", server.handleReconcileFixMultipleLeagueIDs)
 	mux.Handle("/", server.staticHandler())
 
-	log.Printf("leaguerank server listening on %s", server.addr)
+	log.Printf("braacket replacement server listening on %s", server.addr)
 	log.Printf("using db at %s", server.dbPath)
 	if err := http.ListenAndServe(server.addr, requestLogMiddleware(mux)); err != nil {
 		log.Fatal(err)
