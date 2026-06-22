@@ -4,15 +4,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "cli": "bun run src/cli.ts",
     "server": "PATH=/usr/local/go/bin:$PATH go run ./cmd/server",
-    "discover-go": "PATH=/usr/local/go/bin:$PATH go run cmd/sync/main.go discover",
-    "reconcile-go": "PATH=/usr/local/go/bin:$PATH go run ./cmd/reconcile",
-    "comelee": "zsh scripts/comelee-sync.sh",
+    "discover": "PATH=/usr/local/go/bin:$PATH go run ./cmd/sync discover",
+    "sync": "PATH=/usr/local/go/bin:$PATH go run ./cmd/sync",
+    "reconcile": "PATH=/usr/local/go/bin:$PATH go run ./cmd/reconcile",
+    "rank": "PATH=/usr/local/go/bin:$PATH go run ./cmd/rank",
     "test:go": "PATH=/usr/local/go/bin:$PATH go test ./...",
-    "test:bun": "bun test ./test",
     "test:ui": "playwright test",
-    "test": "bun run test:go && bun run test:bun && bun run test:ui"
+    "test": "npm run test:go && npm run test:ui"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.0",
