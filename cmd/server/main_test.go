@@ -913,7 +913,7 @@ func TestStaticHandlerServesIndex(t *testing.T) {
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", recorder.Code)
 	}
-	if !strings.Contains(recorder.Body.String(), "Braacket Replacement") {
+	if !strings.Contains(recorder.Body.String(), "Tornee") {
 		t.Fatalf("expected app shell html, got: %s", recorder.Body.String())
 	}
 }
