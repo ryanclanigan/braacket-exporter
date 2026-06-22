@@ -302,7 +302,7 @@
             </div>
           </div>
           <ul class="rewrite-list">
-            <li>Add native Elo and TrueSkill implementations on the same canonical player graph.</li>
+            <li>Expand ranking admin around the native Colley, Elo, and TrueSkill implementations.</li>
             <li>Expand sync admin from diagnostics into safe per-tournament controls and source-page inspection.</li>
             <li>Move identity repair into the Go API and admin UI.</li>
             <li>Keep Braacket fetch behavior conservative while making our side fast and observable.</li>
@@ -738,7 +738,12 @@
                   <strong>${region.name}</strong>
                   <div class="muted">${region.slug}</div>
                 </div>
-                <div class="muted">${region.playerCount} mapped player${region.playerCount === 1 ? "" : "s"}</div>
+                <div class="stack-actions">
+                  <div class="muted">${region.playerCount} mapped player${region.playerCount === 1 ? "" : "s"}</div>
+                  <button class="button-secondary" type="button" data-delete-region="${region.slug}">
+                    Delete Region
+                  </button>
+                </div>
               </article>
             `
           )
@@ -922,6 +927,19 @@
         regionFeedback.textContent = `Removed region mapping for player ${playerId}.`;
       }
 
+      async function deleteRegion(region) {
+        const response = await fetch("/api/regions/delete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ region }),
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error || "Failed to delete region");
+        }
+        regionFeedback.textContent = `Deleted region ${region}.`;
+      }
+
       rankingForm.addEventListener("submit", (event) => {
         event.preventDefault();
         rankingState.offset = 0;
@@ -976,6 +994,29 @@
         void (async () => {
           try {
             await unassignRegion(Number(unassignButton.dataset.unassignPlayerId));
+            await loadRegionSearch();
+            await loadRegions();
+          } catch (error) {
+            regionFeedback.textContent = error instanceof Error ? error.message : String(error);
+          }
+        })();
+      });
+
+      regionList.addEventListener("click", (event) => {
+        const deleteButton = event.target.closest("button[data-delete-region]");
+        if (!deleteButton) {
+          return;
+        }
+        const region = deleteButton.dataset.deleteRegion;
+        if (!region) {
+          return;
+        }
+        if (!window.confirm(`Delete region ${region}? This also removes all player mappings for it.`)) {
+          return;
+        }
+        void (async () => {
+          try {
+            await deleteRegion(region);
             await loadRegionSearch();
             await loadRegions();
           } catch (error) {

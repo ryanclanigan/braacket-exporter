@@ -206,6 +206,8 @@ test.afterAll(() => {
 });
 
 test("region admin UI assigns and unassigns a player region", async ({ page }) => {
+  page.on("dialog", (dialog) => dialog.accept());
+
   await page.goto(serverURL, { waitUntil: "domcontentloaded" });
   await expect(page.locator("#region-search-form")).toBeVisible();
 
@@ -239,6 +241,10 @@ test("region admin UI assigns and unassigns a player region", async ({ page }) =
   await page.locator('#region-search-form input[name="search"]').fill("Dial");
   await page.locator("#region-search-form button").click();
   await expect(searchCard).toContainText("No region assigned");
+
+  await page.locator('button[data-delete-region="front-range-test"]').click();
+  await expect(page.locator("#region-feedback")).toContainText("Deleted region front-range-test.");
+  await expect(page.locator("#region-list")).not.toContainText("front-range-test");
 });
 
 test("sync diagnostics UI shows queue state and recent tournament failures", async ({ page }) => {
