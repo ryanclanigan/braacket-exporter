@@ -45,7 +45,7 @@ go run ./cmd/sync discover --league another-league
 
 ## Commands
 
-### `npm run server`
+### `go run ./cmd/server`
 
 Starts the new replacement UI and JSON API on `:8080` by default.
 
@@ -68,14 +68,14 @@ Current behavior:
 - `elo` and `trueskill` are explicitly marked as planned
 - static UI is served from the same Go process
 
-### `npm run discover -- --league <slug>`
+### `go run ./cmd/sync discover --league <slug>`
 
 Runs the new Go discovery path and inserts listing-page tournaments into the local queue.
 
 Examples:
 
 ```bash
-npm run discover -- --league comelee
+go run ./cmd/sync discover --league comelee
 BRAACKET_LEAGUE_SLUG=comelee go run ./cmd/sync discover
 ```
 
@@ -251,6 +251,22 @@ Example:
 
 ```bash
 go run ./cmd/reconcile fix-multiple-league-ids --name "Soda cup" --keep-league-id 2AB93591-2B06-45C2-8DD1-A4660093B913
+```
+
+### `go run ./cmd/e2e`
+
+Runs the Playwright end-to-end spec through a Go wrapper so the repo no longer needs JavaScript task scripts or config files.
+
+Defaults:
+
+- executes `npx playwright test e2e/region-ui.spec.ts --workers=1 --timeout=120000`
+- forwards stdout, stderr, stdin, and exit status
+
+Examples:
+
+```bash
+go run ./cmd/e2e
+go run ./cmd/e2e playwright test e2e/region-ui.spec.ts --grep regions
 ```
 
 ## Operational Notes
