@@ -18,295 +18,307 @@
         </div>
         <nav class="sidebar-nav">
           <a href="#overview">Overview</a>
-          <a href="#sync">Sync</a>
-          <a href="#identity">Identity</a>
           <a href="#rankings">Rankings</a>
+          <a href="#sync">Sync</a>
           <a href="#players">Players</a>
+          <a href="#identity">Identity</a>
           <a href="#regions">Regions</a>
-          <a href="#rewrite">Rewrite</a>
         </nav>
       </aside>
 
       <main class="content">
-        <section class="hero">
-          <div>
-            <p class="eyebrow">Admin Surface</p>
-            <h2>Rankings and sync diagnostics without Braacket-side bracket control</h2>
-          </div>
-          <div class="hero-note">
-            <strong>Current server shape:</strong> Go HTTP server + static UI + Go-backed discovery, sync, rankings, and region admin.
-          </div>
-        </section>
-
-        <section id="overview" class="panel">
+        <section id="overview" class="panel collapsible-panel">
           <div class="panel-header">
             <div>
               <p class="eyebrow">League Snapshot</p>
               <h3>Overview</h3>
             </div>
-            <button id="refresh-overview" class="button-secondary">Refresh</button>
+            <div class="panel-actions">
+              <button id="refresh-overview" class="button-secondary">Refresh</button>
+              <button class="button-tertiary panel-toggle" type="button" data-toggle-panel aria-expanded="true">Collapse</button>
+            </div>
           </div>
-          <div id="overview-cards" class="stats-grid"></div>
+          <div class="panel-body">
+            <div id="overview-cards" class="stats-grid"></div>
+          </div>
         </section>
 
-        <section id="rankings" class="panel">
+        <section id="rankings" class="panel collapsible-panel">
           <div class="panel-header">
             <div>
               <p class="eyebrow">Ranking Systems</p>
               <h3>Rankings</h3>
             </div>
+            <div class="panel-actions">
+              <button class="button-tertiary panel-toggle" type="button" data-toggle-panel aria-expanded="true">Collapse</button>
+            </div>
           </div>
+          <div class="panel-body">
+            <form id="ranking-form" class="filters">
+              <label>
+                System
+                <select name="system">
+                  <option value="colley">Colley</option>
+                  <option value="elo">Elo</option>
+                  <option value="trueskill">TrueSkill</option>
+                </select>
+              </label>
+              <label>
+                Start Date
+                <input type="date" name="startDate" />
+              </label>
+              <label>
+                End Date
+                <input type="date" name="endDate" />
+              </label>
+              <label>
+                Min Tournaments
+                <input type="number" name="minTournaments" min="1" value="3" />
+              </label>
+              <label>
+                Tournament Filter
+                <input type="text" name="tournamentNameLike" placeholder="Weekly, Arcadian, Monday..." />
+              </label>
+              <button type="submit" class="button-primary">Load Rankings</button>
+            </form>
 
-          <form id="ranking-form" class="filters">
-            <label>
-              System
-              <select name="system">
-                <option value="colley">Colley</option>
-                <option value="elo">Elo</option>
-                <option value="trueskill">TrueSkill</option>
-              </select>
-            </label>
-            <label>
-              Start Date
-              <input type="date" name="startDate" />
-            </label>
-            <label>
-              End Date
-              <input type="date" name="endDate" />
-            </label>
-            <label>
-              Min Tournaments
-              <input type="number" name="minTournaments" min="1" value="3" />
-            </label>
-            <label>
-              Tournament Filter
-              <input type="text" name="tournamentNameLike" placeholder="Weekly, Arcadian, Monday..." />
-            </label>
-            <button type="submit" class="button-primary">Load Rankings</button>
-          </form>
-
-          <div id="ranking-meta" class="callout"></div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Rank</th>
-                  <th>Player</th>
-                  <th>Score</th>
-                  <th>Strength</th>
-                  <th>Top Wins</th>
-                </tr>
-              </thead>
-              <tbody id="ranking-rows"></tbody>
-            </table>
-          </div>
-          <div class="pager">
-            <button id="previous-page" class="button-secondary" type="button">Previous</button>
-            <div id="ranking-page-meta" class="muted"></div>
-            <button id="next-page" class="button-secondary" type="button">Next</button>
+            <div id="ranking-meta" class="callout"></div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Rank</th>
+                    <th>Player</th>
+                    <th>Score</th>
+                    <th>Strength</th>
+                    <th>Top Wins</th>
+                  </tr>
+                </thead>
+                <tbody id="ranking-rows"></tbody>
+              </table>
+            </div>
+            <div class="pager">
+              <button id="previous-page" class="button-secondary" type="button">Previous</button>
+              <div id="ranking-page-meta" class="muted"></div>
+              <button id="next-page" class="button-secondary" type="button">Next</button>
+            </div>
           </div>
         </section>
 
-        <section id="sync" class="panel">
+        <section id="sync" class="panel collapsible-panel">
           <div class="panel-header">
             <div>
               <p class="eyebrow">Sync Admin</p>
               <h3>Diagnostics</h3>
             </div>
-            <button id="refresh-sync" class="button-secondary">Refresh</button>
-          </div>
-
-          <div id="sync-summary" class="callout">Loading sync status...</div>
-          <div id="sync-state-cards" class="stats-grid sync-stats"></div>
-
-          <div class="sync-grid">
-            <div class="sync-column">
-              <div class="subsection-header">
-                <strong>Recent Runs</strong>
-                <span class="muted">Latest discovery and queue activity</span>
-              </div>
-              <div class="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Run</th>
-                      <th>Status</th>
-                      <th>Started</th>
-                      <th>Counts</th>
-                    </tr>
-                  </thead>
-                  <tbody id="sync-run-rows"></tbody>
-                </table>
-              </div>
+            <div class="panel-actions">
+              <button id="refresh-sync" class="button-secondary">Refresh</button>
+              <button class="button-tertiary panel-toggle" type="button" data-toggle-panel aria-expanded="true">Collapse</button>
             </div>
+          </div>
+          <div class="panel-body">
+            <div id="sync-summary" class="callout">Loading sync status...</div>
+            <div id="sync-state-cards" class="stats-grid sync-stats"></div>
 
-            <div class="sync-column">
-              <div class="subsection-header">
-                <strong>Tournament Queue</strong>
-                <span class="muted">Filter by queue state or search by event name/id</span>
-              </div>
-              <form id="sync-filter-form" class="filters sync-filters compact">
-                <label>
-                  State
-                  <select name="state">
-                    <option value="">All States</option>
-                    <option value="in_progress">In Progress</option>
-                    <option value="failed_retryable">Retryable Failures</option>
-                    <option value="failed_terminal">Terminal Failures</option>
-                    <option value="queued">Queued</option>
-                    <option value="discovered">Discovered</option>
-                    <option value="imported">Imported</option>
-                  </select>
-                </label>
-                <label>
-                  Search
-                  <input type="text" name="search" placeholder="Arcadian, BBB, weekly..." />
-                </label>
-                <button type="submit" class="button-secondary">Filter</button>
-              </form>
-              <div id="sync-action-feedback" class="callout muted">Use requeue, reset, or import on one tournament at a time.</div>
-              <div class="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Tournament</th>
-                      <th>State</th>
-                      <th>Retry</th>
-                      <th>Data</th>
-                      <th>Last Error</th>
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody id="sync-tournament-rows"></tbody>
-                </table>
-              </div>
-              <div id="sync-detail-panel" class="sync-detail-panel">
-                <div class="subsection-header">
-                  <strong>Tournament Detail</strong>
-                  <span id="sync-detail-meta" class="muted">Select a tournament to inspect recent attempts and fetched pages.</span>
-                </div>
-                <div id="sync-attempt-list" class="detail-list"></div>
-                <div id="sync-source-page-list" class="detail-list"></div>
-                <div id="sync-source-preview" class="sync-source-preview">
-                  <div class="detail-card-header">
-                    <strong>Stored HTML Preview</strong>
-                    <a id="sync-source-link" class="preview-link" href="#" target="_blank" rel="noreferrer">Open Source URL</a>
+            <div class="sync-grid">
+              <section class="sync-column collapsible-block is-collapsed">
+                <div class="subsection-header block-header">
+                  <div>
+                    <strong>Recent Runs</strong>
+                    <span class="muted">Latest discovery and queue activity</span>
                   </div>
-                  <div id="sync-source-preview-meta" class="muted">Select a source page to load its stored HTML preview.</div>
-                  <pre id="sync-source-preview-code" class="source-preview-code"></pre>
+                  <button class="button-tertiary block-toggle" type="button" data-toggle-block aria-expanded="false">Expand</button>
                 </div>
-              </div>
+                <div class="collapsible-body" hidden>
+                  <div class="table-wrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Run</th>
+                          <th>Status</th>
+                          <th>Started</th>
+                          <th>Counts</th>
+                        </tr>
+                      </thead>
+                      <tbody id="sync-run-rows"></tbody>
+                    </table>
+                  </div>
+                </div>
+              </section>
+
+              <section class="sync-column collapsible-block">
+                <div class="subsection-header block-header">
+                  <div>
+                    <strong>Tournament Queue</strong>
+                    <span class="muted">Filter by queue state or search by event name/id</span>
+                  </div>
+                  <button class="button-tertiary block-toggle" type="button" data-toggle-block aria-expanded="true">Collapse</button>
+                </div>
+                <div class="collapsible-body">
+                  <form id="sync-filter-form" class="filters sync-filters compact">
+                    <label>
+                      State
+                      <select name="state">
+                        <option value="">All States</option>
+                        <option value="in_progress">In Progress</option>
+                        <option value="failed_retryable">Retryable Failures</option>
+                        <option value="failed_terminal">Terminal Failures</option>
+                        <option value="queued">Queued</option>
+                        <option value="discovered">Discovered</option>
+                        <option value="imported">Imported</option>
+                      </select>
+                    </label>
+                    <label>
+                      Search
+                      <input type="text" name="search" placeholder="Arcadian, BBB, weekly..." />
+                    </label>
+                    <button type="submit" class="button-secondary">Filter</button>
+                  </form>
+                  <div id="sync-action-feedback" class="callout muted">Use requeue, reset, or import on one tournament at a time.</div>
+                  <div class="table-wrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Tournament</th>
+                          <th>State</th>
+                          <th>Retry</th>
+                          <th>Data</th>
+                          <th>Last Error</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody id="sync-tournament-rows"></tbody>
+                    </table>
+                  </div>
+                  <div id="sync-detail-panel" class="sync-detail-panel">
+                    <div class="subsection-header">
+                      <strong>Tournament Detail</strong>
+                      <span id="sync-detail-meta" class="muted">Select a tournament to inspect recent attempts and fetched pages.</span>
+                    </div>
+                    <div id="sync-attempt-list" class="detail-list"></div>
+                    <div id="sync-source-page-list" class="detail-list"></div>
+                    <div id="sync-source-preview" class="sync-source-preview">
+                      <div class="detail-card-header">
+                        <strong>Stored HTML Preview</strong>
+                        <a id="sync-source-link" class="preview-link" href="#" target="_blank" rel="noreferrer">Open Source URL</a>
+                      </div>
+                      <div id="sync-source-preview-meta" class="muted">Select a source page to load its stored HTML preview.</div>
+                      <pre id="sync-source-preview-code" class="source-preview-code"></pre>
+                    </div>
+                  </div>
+                </div>
+              </section>
             </div>
           </div>
         </section>
 
-        <section id="players" class="panel">
+        <section id="players" class="panel collapsible-panel">
           <div class="panel-header">
             <div>
               <p class="eyebrow">Player Index</p>
               <h3>Search</h3>
             </div>
+            <div class="panel-actions">
+              <button class="button-tertiary panel-toggle" type="button" data-toggle-panel aria-expanded="true">Collapse</button>
+            </div>
           </div>
 
-          <form id="player-form" class="filters compact">
-            <label>
-              Search
-              <input type="text" name="search" placeholder="Alice, Dial M, Bob..." />
-            </label>
-            <button type="submit" class="button-secondary">Find Players</button>
-          </form>
+          <div class="panel-body">
+            <form id="player-form" class="filters compact">
+              <label>
+                Search
+                <input type="text" name="search" placeholder="Alice, Dial M, Bob..." />
+              </label>
+              <button type="submit" class="button-secondary">Find Players</button>
+            </form>
 
-          <div id="player-results" class="player-list"></div>
+            <div id="player-results" class="player-list"></div>
+          </div>
         </section>
 
-        <section id="identity" class="panel">
+        <section id="identity" class="panel collapsible-panel">
           <div class="panel-header">
             <div>
               <p class="eyebrow">Identity Admin</p>
               <h3>Reconcile</h3>
             </div>
-            <button id="refresh-reconcile" class="button-secondary">Refresh</button>
+            <div class="panel-actions">
+              <button id="refresh-reconcile" class="button-secondary">Refresh</button>
+              <button class="button-tertiary panel-toggle" type="button" data-toggle-panel aria-expanded="true">Collapse</button>
+            </div>
           </div>
 
-          <div id="reconcile-feedback" class="callout muted">Review likely canonical-player splits before applying any merge repair.</div>
-          <div class="identity-grid">
-            <div class="identity-column">
-              <div class="subsection-header">
-                <strong>Multiple League IDs</strong>
-                <span class="muted">Same visible name, multiple Braacket league IDs.</span>
+          <div class="panel-body">
+            <div id="reconcile-feedback" class="callout muted">Review likely canonical-player splits before applying any merge repair.</div>
+            <div class="identity-grid">
+              <div class="identity-column">
+                <div class="subsection-header">
+                  <strong>Multiple League IDs</strong>
+                  <span class="muted">Same visible name, multiple Braacket league IDs.</span>
+                </div>
+                <div id="reconcile-multiple-groups" class="detail-list"></div>
               </div>
-              <div id="reconcile-multiple-groups" class="detail-list"></div>
-            </div>
 
-            <div class="identity-column">
-              <div class="subsection-header">
-                <strong>Mixed League + Name-Only</strong>
-                <span class="muted">One league-backed player plus one or more fallback name-only rows.</span>
+              <div class="identity-column">
+                <div class="subsection-header">
+                  <strong>Mixed League + Name-Only</strong>
+                  <span class="muted">One league-backed player plus one or more fallback name-only rows.</span>
+                </div>
+                <div id="reconcile-mixed-groups" class="detail-list"></div>
               </div>
-              <div id="reconcile-mixed-groups" class="detail-list"></div>
             </div>
           </div>
         </section>
 
-        <section id="regions" class="panel">
+        <section id="regions" class="panel collapsible-panel">
           <div class="panel-header">
             <div>
               <p class="eyebrow">Region Admin</p>
               <h3>Mappings</h3>
             </div>
-          </div>
-
-          <div class="region-grid">
-            <div class="region-column">
-              <form id="region-search-form" class="filters compact">
-                <label>
-                  Player Search
-                  <input type="text" name="search" placeholder="Dial, Alice, Bob..." />
-                </label>
-                <button type="submit" class="button-secondary">Search</button>
-              </form>
-              <div id="region-search-results" class="player-list"></div>
-            </div>
-
-            <div class="region-column">
-              <form id="region-assign-form" class="filters region-form">
-                <label>
-                  Player ID
-                  <input type="number" name="playerId" min="1" required />
-                </label>
-                <label>
-                  Region Slug
-                  <input type="text" name="region" placeholder="front-range" required />
-                </label>
-                <label>
-                  Region Name
-                  <input type="text" name="name" placeholder="Front Range" />
-                </label>
-                <label>
-                  Note
-                  <input type="text" name="note" placeholder="optional" />
-                </label>
-                <button type="submit" class="button-primary">Assign Region</button>
-              </form>
-              <div id="region-feedback" class="callout muted">Assign or remove player region mappings here.</div>
-              <div id="region-list" class="region-list"></div>
+            <div class="panel-actions">
+              <button class="button-tertiary panel-toggle" type="button" data-toggle-panel aria-expanded="true">Collapse</button>
             </div>
           </div>
-        </section>
 
-        <section id="rewrite" class="panel rewrite-panel">
-          <div class="panel-header">
-            <div>
-              <p class="eyebrow">Rewrite Target</p>
-              <h3>Next native features</h3>
+          <div class="panel-body">
+            <div class="region-grid">
+              <div class="region-column">
+                <form id="region-search-form" class="filters compact">
+                  <label>
+                    Player Search
+                    <input type="text" name="search" placeholder="Dial, Alice, Bob..." />
+                  </label>
+                  <button type="submit" class="button-secondary">Search</button>
+                </form>
+                <div id="region-search-results" class="player-list"></div>
+              </div>
+
+              <div class="region-column">
+                <form id="region-assign-form" class="filters region-form">
+                  <label>
+                    Player ID
+                    <input type="number" name="playerId" min="1" required />
+                  </label>
+                  <label>
+                    Region Slug
+                    <input type="text" name="region" placeholder="front-range" required />
+                  </label>
+                  <label>
+                    Region Name
+                    <input type="text" name="name" placeholder="Front Range" />
+                  </label>
+                  <label>
+                    Note
+                    <input type="text" name="note" placeholder="optional" />
+                  </label>
+                  <button type="submit" class="button-primary">Assign Region</button>
+                </form>
+                <div id="region-feedback" class="callout muted">Assign or remove player region mappings here.</div>
+                <div id="region-list" class="region-list"></div>
+              </div>
             </div>
           </div>
-          <ul class="rewrite-list">
-            <li>Expand ranking admin around the native Colley, Elo, and TrueSkill implementations.</li>
-            <li>Expand sync admin from diagnostics into safe per-tournament controls and source-page inspection.</li>
-            <li>Move identity repair into the Go API and admin UI.</li>
-            <li>Keep Braacket fetch behavior conservative while making our side fast and observable.</li>
-          </ul>
         </section>
       </main>
     </div>
@@ -1187,7 +1199,84 @@
         syncSourcePreviewCode.textContent = "";
       }
 
+      function setPanelCollapsed(panel, collapsed) {
+        panel.classList.toggle("is-collapsed", collapsed);
+        const body = panel.querySelector(".panel-body");
+        if (body) {
+          body.hidden = collapsed;
+        }
+        const toggle = panel.querySelector("[data-toggle-panel]");
+        if (toggle) {
+          toggle.textContent = collapsed ? "Expand" : "Collapse";
+          toggle.setAttribute("aria-expanded", String(!collapsed));
+        }
+      }
+
+      function setBlockCollapsed(block, collapsed) {
+        block.classList.toggle("is-collapsed", collapsed);
+        const body = block.querySelector(".collapsible-body");
+        if (body) {
+          body.hidden = collapsed;
+        }
+        const toggle = block.querySelector("[data-toggle-block]");
+        if (toggle) {
+          toggle.textContent = collapsed ? "Expand" : "Collapse";
+          toggle.setAttribute("aria-expanded", String(!collapsed));
+        }
+      }
+
+      function openPanelForHash(hashValue) {
+        if (!hashValue || !hashValue.startsWith("#")) {
+          return;
+        }
+        const panel = document.querySelector(hashValue);
+        if (panel && panel.classList.contains("collapsible-panel")) {
+          setPanelCollapsed(panel, false);
+        }
+      }
+
+      document.querySelectorAll(".collapsible-panel").forEach((panel) => {
+        setPanelCollapsed(panel, panel.classList.contains("is-collapsed"));
+      });
+
+      document.querySelectorAll(".collapsible-block").forEach((block) => {
+        setBlockCollapsed(block, block.classList.contains("is-collapsed"));
+      });
+
+      document.addEventListener("click", (event) => {
+        const panelToggle = event.target.closest("[data-toggle-panel]");
+        if (panelToggle) {
+          const panel = panelToggle.closest(".collapsible-panel");
+          if (panel) {
+            setPanelCollapsed(panel, !panel.classList.contains("is-collapsed"));
+          }
+          return;
+        }
+
+        const blockToggle = event.target.closest("[data-toggle-block]");
+        if (!blockToggle) {
+          return;
+        }
+        const block = blockToggle.closest(".collapsible-block");
+        if (block) {
+          setBlockCollapsed(block, !block.classList.contains("is-collapsed"));
+        }
+      });
+
+      window.addEventListener("hashchange", () => {
+        openPanelForHash(window.location.hash);
+      });
+
+      document.querySelector(".sidebar-nav").addEventListener("click", (event) => {
+        const link = event.target.closest("a[href^='#']");
+        if (!link) {
+          return;
+        }
+        openPanelForHash(link.getAttribute("href"));
+      });
+
       setDefaultFilters();
+      openPanelForHash(window.location.hash);
       void loadOverview();
       void loadSyncDiagnostics();
       void loadReconcileReport();

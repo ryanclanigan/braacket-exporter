@@ -112,7 +112,10 @@ CREATE TABLE matches (
   attempt_id INTEGER,
   match_key TEXT,
   player1_tournament_player_id INTEGER,
-  player2_tournament_player_id INTEGER
+  player2_tournament_player_id INTEGER,
+  winner_tournament_player_id INTEGER,
+  player1_score INTEGER,
+  player2_score INTEGER
 );
 INSERT INTO sync_runs (id, mode, status, started_at, finished_at, discovered_count, imported_count, failed_count, skipped_count, summary)
 VALUES
@@ -153,11 +156,11 @@ VALUES
   (22, 1, 1, 1002, 'l2', 'Soda cup'),
   (23, 1, 1, 1003, 'l3', 'Dial N'),
   (24, 1, 1, 1004, NULL, 'Dial N');
-INSERT INTO matches (id, tournament_id, attempt_id, match_key, player1_tournament_player_id, player2_tournament_player_id)
+INSERT INTO matches (id, tournament_id, attempt_id, match_key, player1_tournament_player_id, player2_tournament_player_id, winner_tournament_player_id, player1_score, player2_score)
 VALUES
-  (101, 1, 1, 'm1', 11, 12),
-  (102, 1, 1, 'm2', 21, 22),
-      (103, 1, 1, 'm3', 23, 24);
+  (101, 1, 1, 'm1', 11, 12, 11, 3, 0),
+  (102, 1, 1, 'm2', 21, 22, 21, 3, 0),
+      (103, 1, 1, 'm3', 23, 24, 23, 0, -1);
 INSERT INTO source_pages (
   id, run_id, tournament_id, attempt_id, url, page_type, http_status, content_hash, fetched_at, anti_bot_class, error_message, html
 )
@@ -212,6 +215,10 @@ test("region admin UI assigns and unassigns a player region", async ({ page }) =
   await expect(page.locator("#region-search-form")).toBeVisible();
 
   await page.locator('a[href="#regions"]').click();
+  await page.locator('#regions .panel-toggle').click();
+  await expect(page.locator('#regions .panel-body')).toBeHidden();
+  await page.locator('a[href="#regions"]').click();
+  await expect(page.locator('#regions .panel-body')).toBeVisible();
   await page.locator('#region-search-form input[name="search"]').fill("Dial");
   await page.locator("#region-search-form button").click();
 
@@ -273,6 +280,9 @@ test("sync diagnostics UI shows queue state and recent tournament failures", asy
 
   await page.goto(serverURL, { waitUntil: "domcontentloaded" });
   await page.locator('a[href="#sync"]').click();
+  await expect(page.locator(".collapsible-block").first().locator(".collapsible-body")).toBeHidden();
+  await page.locator(".collapsible-block").first().locator('[data-toggle-block]').click();
+  await expect(page.locator(".collapsible-block").first().locator(".collapsible-body")).toBeVisible();
 
   await expect(page.locator("#sync-summary")).toContainText("Latest run:");
   await expect(page.locator("#sync-summary")).toContainText("run");
