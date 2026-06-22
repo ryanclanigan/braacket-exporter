@@ -128,9 +128,10 @@ func ComputeExport(dbPath string, startDate string, endDate string, minimumTourn
 			totalSets += gamesAgainstOpponent
 			weightedOpponentScore += playerByID[record.opponentPlayerID].rating * float64(gamesAgainstOpponent)
 			records = append(records, map[string]interface{}{
-				"wins":     record.wins,
-				"losses":   record.losses,
-				"opponent": record.opponent,
+				"wins":         record.wins,
+				"losses":       record.losses,
+				"opponent":     record.opponent,
+				"opponentRank": rankByPlayerID[record.opponentPlayerID],
 			})
 		}
 

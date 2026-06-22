@@ -904,6 +904,12 @@ VALUES
 	if !ok || len(rawRecords) == 0 {
 		t.Fatalf("expected records in export, got %#v", exported[0]["records"])
 	}
+	firstRecord, ok := rawRecords[0].(map[string]interface{})
+	if ok {
+		if _, hasRank := firstRecord["opponentRank"]; !hasRank {
+			t.Fatalf("expected opponentRank in record: %#v", firstRecord)
+		}
+	}
 }
 
 func TestStaticHandlerServesIndex(t *testing.T) {
