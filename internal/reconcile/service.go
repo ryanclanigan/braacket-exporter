@@ -54,6 +54,11 @@ type playerVariantRow struct {
 	Tournaments int
 }
 
+type canonicalPlayerMatchProfile struct {
+	TotalMatches int
+	DQMatches    int
+}
+
 func NewService(db *sql.DB) *Service {
 	return &Service{
 		db:  db,
@@ -168,6 +173,18 @@ func (s *Service) FixMixedLeagueAndNameOnly(displayName string) (IdentityRepairR
 
 	sourceIDs := make([]int, 0, len(nameOnly))
 	for _, player := range nameOnly {
+		profile, err := s.canonicalPlayerMatchProfile(tx, player.CanonicalPlayerID)
+		if err != nil {
+			return IdentityRepairResult{}, err
+		}
+		if profile.TotalMatches > profile.DQMatches {
+			return IdentityRepairResult{}, fmt.Errorf(
+				"refusing to merge %s: name-only canonical player %d has %d non-DQ match(es)",
+				normalizedName,
+				player.CanonicalPlayerID,
+				profile.TotalMatches-profile.DQMatches,
+			)
+		}
 		sourceIDs = append(sourceIDs, player.CanonicalPlayerID)
 	}
 	updatedRows, err := s.mergeCanonicalPlayers(tx, targetID, sourceIDs)
@@ -381,6 +398,26 @@ ORDER BY tournaments DESC, name ASC`, canonicalPlayerID)
 		result = append(result, item)
 	}
 	return result, rows.Err()
+}
+
+func (s *Service) canonicalPlayerMatchProfile(tx *sql.Tx, canonicalPlayerID int) (canonicalPlayerMatchProfile, error) {
+	var profile canonicalPlayerMatchProfile
+	err := tx.QueryRow(`
+SELECT
+  COUNT(DISTINCT m.id) AS total_matches,
+  COUNT(DISTINCT CASE
+    WHEN COALESCE(m.player1_score, 0) < 0 OR COALESCE(m.player2_score, 0) < 0 THEN m.id
+    ELSE NULL
+  END) AS dq_matches
+FROM tournament_players tp
+LEFT JOIN matches m
+  ON m.player1_tournament_player_id = tp.id
+  OR m.player2_tournament_player_id = tp.id
+WHERE tp.canonical_player_id = ?`, canonicalPlayerID).Scan(&profile.TotalMatches, &profile.DQMatches)
+	if err != nil {
+		return canonicalPlayerMatchProfile{}, err
+	}
+	return profile, nil
 }
 
 func (s *Service) queryIdentitySummaryRows(query string, limit int) ([]identitySummaryRow, error) {

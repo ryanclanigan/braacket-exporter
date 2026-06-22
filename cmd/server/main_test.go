@@ -696,6 +696,8 @@ CREATE TABLE matches (
   player1_tournament_player_id INTEGER,
   player2_tournament_player_id INTEGER,
   winner_tournament_player_id INTEGER,
+  player1_score INTEGER,
+  player2_score INTEGER,
   player1_name TEXT,
   player2_name TEXT,
   winner_name TEXT
@@ -715,9 +717,9 @@ INSERT INTO tournament_players (id, tournament_id, attempt_id, canonical_player_
 VALUES
   (10, 1, 1, 2, 'l2', 'Soda cup'),
   (11, 1, 1, 4, NULL, 'Dial M');
-INSERT INTO matches (id, tournament_id, attempt_id, match_key, player1_tournament_player_id, player2_tournament_player_id, winner_tournament_player_id, player1_name, player2_name, winner_name)
+INSERT INTO matches (id, tournament_id, attempt_id, match_key, player1_tournament_player_id, player2_tournament_player_id, winner_tournament_player_id, player1_score, player2_score, player1_name, player2_name, winner_name)
 VALUES
-  (101, 1, 1, 'm1', 10, 11, 10, 'Soda cup', 'Dial M', 'Soda cup');
+  (101, 1, 1, 'm1', 10, 11, 10, 0, -1, 'Soda cup', 'Dial M', 'Soda cup');
 `)
 
 	server := &app{dbPath: dbPath}

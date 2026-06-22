@@ -92,6 +92,65 @@ VALUES (10, 1, 1, 2, 'Dial M');
 	assertTournamentPlayerTarget(t, db, 10, 1)
 }
 
+func TestFixMixedLeagueAndNameOnlyRefusesNonDQMatches(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	seedMinimalImportGraph(t, db)
+
+	mustExecDB(t, db, `
+INSERT INTO players (id, canonical_name, braacket_league_player_id, name, first_seen_at, last_seen_at)
+VALUES
+  (1, 'league:l3', 'l3', 'Dial M', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
+  (2, 'name:dial m', NULL, 'Dial M', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+INSERT INTO tournament_players (id, tournament_id, attempt_id, canonical_player_id, name)
+VALUES
+  (10, 1, 1, 1, 'Dial M'),
+  (11, 1, 1, 2, 'Dial M');
+INSERT INTO matches (
+  id, tournament_id, attempt_id, match_key, player1_tournament_player_id, player2_tournament_player_id,
+  winner_tournament_player_id, player1_name, player2_name, winner_name, player1_score, player2_score
+)
+VALUES
+  (101, 1, 1, 'm1', 10, 11, 10, 'Dial M', 'Dial M', 'Dial M', 3, 0);
+`)
+
+	_, err := NewService(db).FixMixedLeagueAndNameOnly("Dial M")
+	if err == nil || !strings.Contains(err.Error(), "non-DQ match") {
+		t.Fatalf("expected non-DQ refusal, got %v", err)
+	}
+}
+
+func TestFixMixedLeagueAndNameOnlyAllowsDQOnlyMatches(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	seedMinimalImportGraph(t, db)
+
+	mustExecDB(t, db, `
+INSERT INTO players (id, canonical_name, braacket_league_player_id, name, first_seen_at, last_seen_at)
+VALUES
+  (1, 'league:l3', 'l3', 'Dial M', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
+  (2, 'name:dial m', NULL, 'Dial M', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+INSERT INTO tournament_players (id, tournament_id, attempt_id, canonical_player_id, name)
+VALUES
+  (10, 1, 1, 1, 'Dial M'),
+  (11, 1, 1, 2, 'Dial M');
+INSERT INTO matches (
+  id, tournament_id, attempt_id, match_key, player1_tournament_player_id, player2_tournament_player_id,
+  winner_tournament_player_id, player1_name, player2_name, winner_name, player1_score, player2_score
+)
+VALUES
+  (101, 1, 1, 'm1', 10, 11, 10, 'Dial M', 'Dial M', 'Dial M', 0, -1);
+`)
+
+	result, err := NewService(db).FixMixedLeagueAndNameOnly("Dial M")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.TargetCanonicalPlayerID != 1 || result.TournamentPlayerRowsUpdated != 1 {
+		t.Fatalf("unexpected repair result: %#v", result)
+	}
+}
+
 func TestFixMultipleLeagueIDs(t *testing.T) {
 	db := openTestDB(t)
 	defer db.Close()
