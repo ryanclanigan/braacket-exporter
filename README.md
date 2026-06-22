@@ -1,14 +1,14 @@
 # Braacket League Sync
 
-Resumable Bun + SQLite importer for public Braacket league tournaments.
+Resumable Go + SQLite importer for public Braacket league tournaments.
 
-This repository now also contains an initial Go-based web app shell for the admin/rankings side of the replacement. The current web layer wraps the existing Bun ranking implementation for Colley while the native rewrite is underway.
+This repository is now Go-first across importer, rankings, reconcile/admin flows, and the web app.
 
 The CLI can target any league slug:
 
 ```bash
-bun run cli sync --league your-league discover
-bun run cli sync --league your-league run
+go run ./cmd/sync discover --league your-league
+go run ./cmd/sync run --league your-league
 ```
 
 ## Environment
@@ -38,14 +38,14 @@ Precedence:
 Examples:
 
 ```bash
-BRAACKET_LEAGUE_SLUG=your-league bun run cli sync discover
-BRAACKET_DB_PATH=./data/your-league.sqlite BRAACKET_COOKIE_JAR_PATH=./data/your-league-cookies.json BRAACKET_LEAGUE_SLUG=your-league bun run cli sync run
-bun run cli sync --league another-league discover
+BRAACKET_LEAGUE_SLUG=your-league go run ./cmd/sync discover
+BRAACKET_DB_PATH=./data/your-league.sqlite BRAACKET_COOKIE_JAR_PATH=./data/your-league-cookies.json BRAACKET_LEAGUE_SLUG=your-league go run ./cmd/sync run
+go run ./cmd/sync discover --league another-league
 ```
 
 ## Commands
 
-### `bun run server`
+### `npm run server`
 
 Starts the new replacement UI and JSON API on `:8080` by default.
 
@@ -54,9 +54,6 @@ Environment:
 - `BRAACKET_SERVER_ADDR`
   HTTP bind address
   Default: `:8080`
-- `BUN_PATH`
-  Bun executable path used by the Go server when it shells out to the existing Colley ranking command
-  Default: `bun`
 
 Current API surface:
 
@@ -67,19 +64,19 @@ Current API surface:
 
 Current behavior:
 
-- `colley` is live and uses the existing Bun ranking pipeline
+- `colley` is live and computed natively in Go
 - `elo` and `trueskill` are explicitly marked as planned
 - static UI is served from the same Go process
 
-### `bun run discover-go -- --league <slug>`
+### `npm run discover -- --league <slug>`
 
 Runs the new Go discovery path and inserts listing-page tournaments into the local queue.
 
 Examples:
 
 ```bash
-bun run discover-go -- --league comelee
-BRAACKET_LEAGUE_SLUG=comelee bun run discover-go
+npm run discover -- --league comelee
+BRAACKET_LEAGUE_SLUG=comelee go run ./cmd/sync discover
 ```
 
 Current scope:
@@ -87,9 +84,9 @@ Current scope:
 - fetches league listing pages
 - stores raw listing HTML in `source_pages`
 - upserts discovered tournaments into `tournaments`
-- does not yet replace the Bun tournament import path
+- uses the canonical Go discovery path
 
-### `bun run cli sync [--league <slug>] discover`
+### `go run ./cmd/sync discover [--league <slug>]`
 
 Sequentially crawls the selected league listing pages at `https://braacket.com/league/<slug>/tournament` and inserts newly discovered tournaments into the local queue.
 
@@ -103,7 +100,7 @@ What it does:
 - inserts unseen tournaments into `tournaments` with `queued` state
 - leaves already-known imported tournaments alone
 
-### `bun run cli sync [--league <slug>] run`
+### `go run ./cmd/sync run [--league <slug>]`
 
 Processes the queue sequentially, one tournament at a time.
 
@@ -117,22 +114,22 @@ What it does:
 
 `sync run` is now safe to use after an interruption. You do not need to switch to a different command after `Ctrl-C`.
 
-### `bun run cli sync [--league <slug>] event <id-or-url> [--force]`
+### `go run ./cmd/sync event <id-or-url> [--league <slug>] [--force]`
 
 Imports one specific tournament by Braacket id or full tournament URL.
 
 Examples:
 
 ```bash
-bun run cli sync event 6A7851C8-8249-4C8F-AC30-179FD9A19CE0
-bun run cli sync event https://braacket.com/tournament/6A7851C8-8249-4C8F-AC30-179FD9A19CE0
-bun run cli sync event 6A7851C8-8249-4C8F-AC30-179FD9A19CE0 --force
-bun run cli sync --league your-league event 6A7851C8-8249-4C8F-AC30-179FD9A19CE0
+go run ./cmd/sync event 6A7851C8-8249-4C8F-AC30-179FD9A19CE0 --league comelee
+go run ./cmd/sync event https://braacket.com/tournament/6A7851C8-8249-4C8F-AC30-179FD9A19CE0 --league comelee
+go run ./cmd/sync event 6A7851C8-8249-4C8F-AC30-179FD9A19CE0 --league comelee --force
+go run ./cmd/sync event 6A7851C8-8249-4C8F-AC30-179FD9A19CE0 --league your-league
 ```
 
 Use `--force` when you want to discard the tournament's existing normalized rows and rebuild it from the live source pages.
 
-### `bun run cli sync [--league <slug>] reset-event <id-or-url>`
+### `go run ./cmd/sync reset-event <id-or-url> [--league <slug>]`
 
 Deletes one tournament's normalized rows and resets its state back to `queued`.
 
@@ -141,7 +138,7 @@ Use this when:
 - you want it retried later by `sync run`
 - you want to clear normalized rows without immediately reimporting
 
-### `bun run cli rank colley --start-date <YYYY-MM-DD> --end-date <YYYY-MM-DD> --min-tournaments <n> [--tournament-name-like <substring>] [--export <path>]`
+### `go run ./cmd/rank colley --start-date <YYYY-MM-DD> --end-date <YYYY-MM-DD> --min-tournaments <n> [--tournament-name-like <substring>] [--export <path>]`
 
 Computes a Colley matrix ranking from imported match results in the local SQLite database.
 
@@ -172,22 +169,22 @@ Notes:
 Example:
 
 ```bash
-bun run cli rank colley --start-date 2026-01-01 --end-date 2026-06-30 --min-tournaments 3
+go run ./cmd/rank colley --start-date 2026-01-01 --end-date 2026-06-30 --min-tournaments 3
 ```
 
 Example with export:
 
 ```bash
-bun run cli rank colley --start-date 2026-01-01 --end-date 2026-06-30 --min-tournaments 3 --export ./exports/h1-2026-players.json
+go run ./cmd/rank colley --start-date 2026-01-01 --end-date 2026-06-30 --min-tournaments 3 --export ./exports/h1-2026-players.json
 ```
 
 Example scoped to one tournament family:
 
 ```bash
-bun run cli rank colley --start-date 2026-01-01 --end-date 2026-06-30 --min-tournaments 3 --tournament-name-like "Wednesday" --export ./exports/h1-2026-wednesdays.json
+go run ./cmd/rank colley --start-date 2026-01-01 --end-date 2026-06-30 --min-tournaments 3 --tournament-name-like "Wednesday" --export ./exports/h1-2026-wednesdays.json
 ```
 
-### `bun run reconcile-go -- identities [--limit <n>]`
+### `go run ./cmd/reconcile identities [--limit <n>]`
 
 Builds a read-only report of likely player identity splits in the local SQLite database through the native Go reconcile service.
 
@@ -211,11 +208,10 @@ Arguments:
 Example:
 
 ```bash
-bun run reconcile-go -- identities --limit 20
 go run ./cmd/reconcile identities --limit 20
 ```
 
-### `bun run reconcile-go -- fix-mixed-name-only --name <display-name>`
+### `go run ./cmd/reconcile fix-mixed-name-only --name <display-name>`
 
 Repairs the "one league-backed row plus one or more name-only fallback rows" case for a single display name.
 
@@ -233,11 +229,10 @@ What it does:
 Example:
 
 ```bash
-bun run reconcile-go -- fix-mixed-name-only --name "Dial M"
 go run ./cmd/reconcile fix-mixed-name-only --name "Dial M"
 ```
 
-### `bun run reconcile-go -- fix-multiple-league-ids --name <display-name> --keep-league-id <id>`
+### `go run ./cmd/reconcile fix-multiple-league-ids --name <display-name> --keep-league-id <id>`
 
 Repairs the "same display name with multiple Braacket league player IDs" case for a single display name.
 
@@ -255,13 +250,8 @@ What it does:
 Example:
 
 ```bash
-bun run reconcile-go -- fix-multiple-league-ids --name "Soda cup" --keep-league-id 2AB93591-2B06-45C2-8DD1-A4660093B913
 go run ./cmd/reconcile fix-multiple-league-ids --name "Soda cup" --keep-league-id 2AB93591-2B06-45C2-8DD1-A4660093B913
 ```
-
-Legacy note:
-- the Bun `bun run cli reconcile ...` commands still exist, but the Go CLI and Go admin UI are now the canonical reconcile paths
-- prefer the Go path for new operational workflows
 
 ## Operational Notes
 

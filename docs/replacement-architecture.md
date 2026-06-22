@@ -29,23 +29,19 @@ The first pass in this repo uses a Go HTTP server because:
 
 The current repository still has a few transitional pieces we preserve short term:
 
-- Braacket ingestion helpers and some legacy scripts in Bun
 - Elo and TrueSkill are not implemented yet
 - SQLite as the durable local store
 
 The Go runtime now owns the live read/query path, native Colley ranking, sync diagnostics/admin flows,
-and identity repair. Discovery/import is also run through Go for the canonical path, while some legacy Bun
-entrypoints remain available during the transition.
+identity repair, discovery/import, and the canonical CLI surface.
 
 That means:
 
 - `GET /api/rankings?system=colley` is live and computed natively in Go
 - `GET /api/rankings?system=elo|trueskill` is intentionally marked as planned
 - overview and player search run through in-process SQLite queries from Go
-- sync diagnostics, source-page inspection, region admin, and identity repair are live in Go
-- `go run ./cmd/sync ...` and `go run ./cmd/reconcile ...` are the canonical operational CLIs
-
-This is a deliberate bridge, not the target end state.
+- sync diagnostics, source-page inspection, region admin, identity repair, and ranking export are live in Go
+- `go run ./cmd/sync ...`, `go run ./cmd/reconcile ...`, and `go run ./cmd/rank ...` are the canonical operational CLIs
 
 ## Migration Order
 
@@ -60,7 +56,7 @@ This order is deliberate:
 
 - it stabilizes the server runtime first
 - it removes runtime process hops before importer rewrites
-- it keeps the existing Bun importer usable until the product-facing ranking surface is solid
+- it keeps product-facing admin/ranking work shipping while ingestion and repair paths are rewritten
 
 ## Native Rewrite Targets
 
@@ -68,7 +64,7 @@ This order is deliberate:
 
 - move ranking computation into native Go packages
 - implement `colley`, `elo`, and `trueskill` against canonical players and imported match rows
-- replace shell-outs with in-process DB access and job execution
+- keep DB access and job execution in-process
 - migrate sync work from sequential orchestration to bounded worker pools with per-tournament isolation
 - expose sync run history, failure classes, and source page inspection through the API
 
@@ -84,17 +80,4 @@ This order is deliberate:
 - cached ranking snapshots keyed by system and filter set
 - player rating history over time
 - ranking runs and invalidation metadata
-- region tracking parity with the Bun-side data model and admin flows
-
-## Why Not Stay Bun-Only
-
-Bun is useful for the importer and existing scripts, but the current codebase shape is still a CLI-first pipeline with sequential orchestration.
-
-The replacement needs:
-
-- better server boundaries
-- concurrent request handling
-- clearer long-running job management
-- cleaner admin-facing operability
-
-A Go service gives that without a large dependency footprint.
+- region tracking parity across CLI, API, and admin UI flows
