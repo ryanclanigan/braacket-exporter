@@ -60,12 +60,15 @@ Current API surface:
 - `GET /api/health`
 - `GET /api/overview`
 - `GET /api/players?search=<name>&limit=<n>`
+- `GET /api/regions`
+- `POST /api/regions/assign`
+- `POST /api/regions/unassign`
+- `POST /api/regions/delete`
 - `GET /api/rankings?system=colley|elo|trueskill&startDate=<YYYY-MM-DD>&endDate=<YYYY-MM-DD>&minTournaments=<n>&tournamentNameLike=<substring>`
 
 Current behavior:
 
-- `colley` is live and computed natively in Go
-- `elo` and `trueskill` are explicitly marked as planned
+- `colley`, `elo`, and `trueskill` are live and computed natively in Go
 - static UI is served from the same Go process
 
 ### `go run ./cmd/sync discover --league <slug>`
