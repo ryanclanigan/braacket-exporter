@@ -255,6 +255,27 @@ test("region admin UI assigns and unassigns a player region", async ({ page }) =
 });
 
 test("sync diagnostics UI shows queue state and recent tournament failures", async ({ page }) => {
+  await page.route("**/api/sync/discover", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ status: "ok", action: "discover", discoveredCount: 3, summary: "Discovered 3 tournament(s)" }),
+    });
+  });
+  await page.route("**/api/sync/run", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ status: "ok", action: "run", summary: "Queue sync completed." }),
+    });
+  });
+  await page.route("**/api/sync/discover-run", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ status: "ok", action: "discover-run", discoveredCount: 3, summary: "Discovered 3 tournament(s) and completed queue sync." }),
+    });
+  });
   await page.route("**/api/sync/requeue", async (route) => {
     await route.fulfill({
       status: 200,
@@ -288,6 +309,15 @@ test("sync diagnostics UI shows queue state and recent tournament failures", asy
   await expect(page.locator("#sync-summary")).toContainText("run");
   await expect(page.locator("#sync-state-cards")).toContainText("Failed Retryable");
   await expect(page.locator("#sync-run-rows")).toContainText("Processing queue");
+
+  await page.locator("#sync-discover").click();
+  await expect(page.locator("#sync-action-feedback")).toContainText("Discovered 3 tournament(s)");
+
+  await page.locator("#sync-run-queue").click();
+  await expect(page.locator("#sync-action-feedback")).toContainText("Queue sync completed.");
+
+  await page.locator("#sync-discover-run").click();
+  await expect(page.locator("#sync-action-feedback")).toContainText("Discovered 3 tournament(s) and completed queue sync.");
 
   await page.locator('#sync-filter-form select[name="state"]').selectOption("failed_retryable");
   await page.locator('#sync-filter-form input[name="search"]').fill("Arcadian");
@@ -354,9 +384,53 @@ test("rankings UI shows expandable head-to-head details", async ({ page }) => {
   const detailRow = page.locator(".ranking-detail-row").first();
   await expect(detailRow).toBeVisible();
   await expect(detailRow).toContainText("Head To Head");
-  await expect(detailRow).toContainText("Bob");
+  await expect(detailRow.locator(".ranking-h2h-item").first()).toContainText("#");
   await expect(detailRow).toContainText("1 - 0");
 
   await detailRow.locator('[data-ranking-sort="record"]').click();
   await expect(detailRow).toContainText("Record");
+});
+
+test("rankings UI saves, opens, refreshes, and deletes shared snapshots", async ({ page }) => {
+  page.on("dialog", (dialog) => dialog.accept());
+
+  await page.goto(serverURL, { waitUntil: "domcontentloaded" });
+  await page.locator('a[href="#rankings"]').click();
+  await page.locator('#ranking-form select[name="system"]').selectOption("elo");
+  await page.locator('#ranking-form input[name="minTournaments"]').fill("1");
+  await page.locator('#ranking-form button[type="submit"]').click();
+
+  await expect(page.locator("#ranking-rows")).toContainText("Dial M");
+
+  await page.locator('#saved-ranking-form input[name="name"]').fill("Dial Snapshot");
+  await page.locator('#saved-ranking-form button[type="submit"]').click();
+  await expect(page.locator("#saved-ranking-feedback")).toContainText("Saved snapshot Dial Snapshot.");
+  await expect(page.locator("#saved-ranking-list")).toContainText("Dial Snapshot");
+  await expect(page.locator("#saved-ranking-list")).toContainText("ELO");
+  await expect(page.locator("#saved-ranking-list")).toContainText("Make Default");
+
+  await page.locator('button[data-saved-default="1"]').click();
+  await expect(page.locator("#saved-ranking-feedback")).toContainText("Set default snapshot Dial Snapshot.");
+  await expect(page.locator("#saved-ranking-list")).toContainText("Default");
+  await expect(page.locator("#saved-ranking-list")).toContainText("Clear Default");
+
+  await page.locator('button[data-saved-open="1"]').click();
+  await expect(page.locator("#ranking-meta")).toContainText("Saved Snapshot:");
+  await expect(page.locator("#ranking-meta")).toContainText("Dial Snapshot");
+  await expect(page.locator("#ranking-rows")).toContainText("Dial M");
+
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.locator('a[href="#rankings"]').click();
+  await expect(page.locator("#saved-ranking-feedback")).toContainText("Loaded default snapshot Dial Snapshot.");
+  await expect(page.locator("#ranking-meta")).toContainText("Saved Snapshot:");
+  await expect(page.locator("#ranking-meta")).toContainText("Dial Snapshot");
+  await expect(page.locator("#ranking-rows")).toContainText("Dial M");
+
+  await page.locator('button[data-saved-refresh="1"]').click();
+  await expect(page.locator("#saved-ranking-feedback")).toContainText("Refreshed snapshot Dial Snapshot.");
+  await expect(page.locator("#ranking-meta")).toContainText("Saved Snapshot:");
+
+  await page.locator('button[data-saved-delete="1"]').click();
+  await expect(page.locator("#saved-ranking-feedback")).toContainText("Deleted saved snapshot Dial Snapshot.");
+  await expect(page.locator("#saved-ranking-list")).not.toContainText("Dial Snapshot");
 });

@@ -3,15 +3,15 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Tornee</title>
-    <link rel="stylesheet" href="/app.css" />
+    <title>Tourknee</title>
+    <link rel="stylesheet" href="app.css" />
   </head>
   <body>
     <div class="page-shell">
       <aside class="sidebar">
         <div>
           <p class="eyebrow">Ranking Ops</p>
-          <h1>Tornee</h1>
+          <h1>Tourknee</h1>
           <p class="lede">
             Fast admin-facing rankings, import visibility, and a UI that is built for reading league data instead of waiting on it.
           </p>
@@ -54,6 +54,24 @@
             </div>
           </div>
           <div class="panel-body">
+            <section class="saved-rankings-panel">
+              <div class="subsection-header">
+                <div>
+                  <strong>Saved Rankings</strong>
+                  <span class="muted">Shared named snapshots stored in SQLite.</span>
+                </div>
+              </div>
+              <form id="saved-ranking-form" class="filters compact">
+                <label>
+                  Snapshot Name
+                  <input type="text" name="name" placeholder="Summer 2026 Elo" required />
+                </label>
+                <button type="submit" class="button-secondary">Save Snapshot</button>
+              </form>
+              <div id="saved-ranking-feedback" class="callout muted">Save the current ranking query as a frozen shared snapshot.</div>
+              <div id="saved-ranking-list" class="saved-ranking-list"></div>
+            </section>
+
             <form id="ranking-form" class="filters">
               <label>
                 System
@@ -83,7 +101,7 @@
             </form>
 
             <div id="ranking-meta" class="callout"></div>
-            <div class="table-wrap">
+            <div id="ranking-table-wrap" class="table-wrap">
               <table>
                 <thead>
                 <tr>
@@ -119,6 +137,11 @@
           </div>
           <div class="panel-body">
             <div id="sync-summary" class="callout">Loading sync status...</div>
+            <div class="sync-admin-actions">
+              <button id="sync-discover" class="button-secondary" type="button">Discover</button>
+              <button id="sync-run-queue" class="button-secondary" type="button">Run Queue Sync</button>
+              <button id="sync-discover-run" class="button-primary" type="button">Discover + Sync</button>
+            </div>
             <div id="sync-state-cards" class="stats-grid sync-stats"></div>
 
             <div class="sync-grid">
@@ -342,31 +365,48 @@
       const reconcileMixedGroups = document.querySelector("#reconcile-mixed-groups");
       const rankingMeta = document.querySelector("#ranking-meta");
       const rankingRows = document.querySelector("#ranking-rows");
+      const rankingTableWrap = document.querySelector("#ranking-table-wrap");
+      const savedRankingForm = document.querySelector("#saved-ranking-form");
+      const savedRankingFeedback = document.querySelector("#saved-ranking-feedback");
+      const savedRankingList = document.querySelector("#saved-ranking-list");
       const playerResults = document.querySelector("#player-results");
       const regionSearchResults = document.querySelector("#region-search-results");
       const regionList = document.querySelector("#region-list");
       const regionFeedback = document.querySelector("#region-feedback");
       const rankingForm = document.querySelector("#ranking-form");
+      const rankingSubmitButton = rankingForm.querySelector('button[type="submit"]');
       const syncFilterForm = document.querySelector("#sync-filter-form");
       const playerForm = document.querySelector("#player-form");
       const regionSearchForm = document.querySelector("#region-search-form");
       const regionAssignForm = document.querySelector("#region-assign-form");
       const refreshOverviewButton = document.querySelector("#refresh-overview");
       const refreshSyncButton = document.querySelector("#refresh-sync");
+      const syncDiscoverButton = document.querySelector("#sync-discover");
+      const syncRunQueueButton = document.querySelector("#sync-run-queue");
+      const syncDiscoverRunButton = document.querySelector("#sync-discover-run");
       const refreshReconcileButton = document.querySelector("#refresh-reconcile");
       const previousPageButton = document.querySelector("#previous-page");
       const nextPageButton = document.querySelector("#next-page");
       const rankingPageMeta = document.querySelector("#ranking-page-meta");
       const rankingDetailState = new Map();
+      const rankingRecordsByPlayer = new Map();
+      const apiRoot = new URL("api/", window.location.href);
 
       const rankingState = {
         limit: 50,
         offset: 0,
+        source: "live",
+        savedRankingId: 0,
+        savedSnapshot: null,
+        loading: false,
+        requestId: 0,
       };
 
       const syncState = {
         selectedBraacketId: "",
         selectedSourcePageId: 0,
+        pollTimer: 0,
+        actionCount: 0,
       };
 
       function defaultDate(offsetDays) {
@@ -655,15 +695,28 @@
           rankingMeta.innerHTML = `<div class="warning">${data.message || "Ranking system not available."}</div>`;
           rankingRows.innerHTML = "";
           rankingPageMeta.textContent = "";
+          rankingRecordsByPlayer.clear();
           return;
         }
 
         const players = Array.isArray(data.players) ? data.players : [];
-        rankingMeta.innerHTML = `
-          <strong>${data.totalPlayers ?? players.length}</strong> ranked players from
-          <strong>${data.startDate}</strong> to <strong>${data.endDate}</strong>
-          with minimum attendance <strong>${data.minTournaments}</strong>.
-        `;
+        rankingRecordsByPlayer.clear();
+        const tournamentFilter = data.tournamentNameLike ? ` Tournament filter: <strong>${escapeHTML(data.tournamentNameLike)}</strong>.` : "";
+        rankingMeta.innerHTML =
+          data.source === "saved"
+            ? `
+              <strong>Saved Snapshot:</strong> ${escapeHTML(data.savedRankingName || "Unnamed snapshot")}<br />
+              <span class="muted">Saved ${formatDateTime(data.savedAt)} • Generated ${formatDateTime(data.generatedAt)}</span><br />
+              <strong>${data.totalPlayers ?? players.length}</strong> ranked players from
+              <strong>${data.startDate}</strong> to <strong>${data.endDate}</strong>
+              with minimum attendance <strong>${data.minTournaments}</strong>.${tournamentFilter}
+            `
+            : `
+              <strong>Live Results:</strong> Generated ${formatDateTime(data.generatedAt)}<br />
+              <strong>${data.totalPlayers ?? players.length}</strong> ranked players from
+              <strong>${data.startDate}</strong> to <strong>${data.endDate}</strong>
+              with minimum attendance <strong>${data.minTournaments}</strong>.${tournamentFilter}
+            `;
         const startRank = (data.offset ?? 0) + 1;
         const endRank = (data.offset ?? 0) + players.length;
         rankingPageMeta.textContent =
@@ -688,6 +741,7 @@
                   .join(", ")
               : "";
             const playerKey = String(player.name || player.rank || "");
+            rankingRecordsByPlayer.set(playerKey, Array.isArray(player.records) ? player.records : []);
             const detailState = rankingDetailState.get(playerKey) || { open: false, sort: "rank", desc: false };
             const detailHTML = renderH2HDetail(player.records, detailState);
 
@@ -719,6 +773,38 @@
           .join("");
       }
 
+      function renderSavedRankings(data) {
+        const items = Array.isArray(data.savedRankings) ? data.savedRankings : [];
+        savedRankingList.innerHTML = items.length
+          ? items
+              .map(
+                (item) => `
+                  <article class="saved-ranking-card">
+                    <div>
+                      <strong>${escapeHTML(item.name)}${item.isDefault ? ' <span class="saved-ranking-default">Default</span>' : ""}</strong>
+                      <div class="muted">
+                        ${escapeHTML(String(item.system || "").toUpperCase())} • ${escapeHTML(item.startDate)} to ${escapeHTML(item.endDate)} • min ${item.minTournaments}
+                      </div>
+                      <div class="muted">
+                        ${item.tournamentNameLike ? `filter ${escapeHTML(item.tournamentNameLike)} • ` : ""}saved ${formatDateTime(item.savedAt)} • generated ${formatDateTime(item.generatedAt)}
+                      </div>
+                      <div class="muted">${item.totalPlayers} saved player${item.totalPlayers === 1 ? "" : "s"}</div>
+                    </div>
+                    <div class="stack-actions">
+                      <button class="button-secondary" type="button" data-saved-open="${item.id}">Open</button>
+                      <button class="button-secondary" type="button" data-saved-default="${item.id}" data-saved-is-default="${item.isDefault ? "true" : "false"}">
+                        ${item.isDefault ? "Clear Default" : "Make Default"}
+                      </button>
+                      <button class="button-secondary" type="button" data-saved-refresh="${item.id}">Refresh Snapshot</button>
+                      <button class="button-secondary" type="button" data-saved-delete="${item.id}" data-saved-name="${escapeHTML(item.name)}">Delete</button>
+                    </div>
+                  </article>
+                `
+              )
+              .join("")
+          : `<div class="muted">No saved ranking snapshots yet.</div>`;
+      }
+
       function renderH2HDetail(records, detailState) {
         const normalized = Array.isArray(records) ? records.map((record) => ({
           opponent: String(record.opponent || "Unknown"),
@@ -747,7 +833,10 @@
         return `
           <div class="ranking-h2h-panel">
             <div class="ranking-h2h-toolbar">
-              <div class="eyebrow">Head To Head</div>
+              <div class="ranking-h2h-heading">
+                <strong>Head To Head</strong>
+                <span class="muted">${sorted.length} opponent${sorted.length === 1 ? "" : "s"}</span>
+              </div>
               <div class="ranking-h2h-actions">
                 <button
                   class="button-tertiary ranking-sort-toggle"
@@ -768,14 +857,17 @@
             <div class="ranking-h2h-list">
               ${sorted.map((record) => `
                 <div class="ranking-h2h-item" style="--h2h-bg: ${recordColor(record)}">
+                  <div class="ranking-h2h-rank">${record.opponentRank > 0 ? `#${record.opponentRank}` : "UR"}</div>
+                  <div class="ranking-h2h-opponent">
+                    <strong>${escapeHTML(record.opponent)}</strong>
+                  </div>
                   <div class="ranking-h2h-score">
                     <span class="wins">${record.wins}</span>
                     <span class="muted">-</span>
                     <span class="losses">${record.losses}</span>
                   </div>
-                  <div class="ranking-h2h-opponent">
-                    <span class="muted">${record.opponentRank > 0 ? `#${record.opponentRank}` : "Unranked"}</span>
-                    <strong>${escapeHTML(record.opponent)}</strong>
+                  <div class="ranking-h2h-summary muted">
+                    ${record.wins + record.losses} set${record.wins + record.losses === 1 ? "" : "s"}
                   </div>
                 </div>
               `).join("")}
@@ -865,7 +957,7 @@
 
       async function loadOverview() {
         overviewCards.innerHTML = `<div class="muted">Loading overview...</div>`;
-        const response = await fetch("/api/overview");
+        const response = await fetch(apiPath("overview"));
         const data = await response.json();
         renderOverview(data);
       }
@@ -873,14 +965,14 @@
       async function loadSyncSummary() {
         syncSummary.textContent = "Loading sync status...";
         syncStateCards.innerHTML = "";
-        const response = await fetch("/api/sync/summary");
+        const response = await fetch(apiPath("sync/summary"));
         const data = await response.json();
         renderSyncSummary(data);
       }
 
       async function loadSyncRuns() {
         syncRunRows.innerHTML = `<tr><td colspan="4" class="muted">Loading runs...</td></tr>`;
-        const response = await fetch("/api/sync/runs?limit=8");
+        const response = await fetch(apiPath("sync/runs?limit=8"));
         const data = await response.json();
         renderSyncRuns(data);
       }
@@ -889,7 +981,7 @@
         syncTournamentRows.innerHTML = `<tr><td colspan="5" class="muted">Loading tournaments...</td></tr>`;
         const params = new URLSearchParams(new FormData(syncFilterForm));
         params.set("limit", "25");
-        const response = await fetch(`/api/sync/tournaments?${params.toString()}`);
+        const response = await fetch(apiPath(`sync/tournaments?${params.toString()}`));
         const data = await response.json();
         renderSyncTournaments(data);
         if (syncState.selectedBraacketId) {
@@ -910,10 +1002,51 @@
         }
       }
 
+      async function refreshSyncLiveState() {
+        await loadSyncDiagnostics();
+        if (syncState.selectedBraacketId) {
+          try {
+            await loadSyncTournamentDetail(syncState.selectedBraacketId);
+          } catch {}
+        }
+      }
+
+      function setSyncButtonsDisabled(disabled) {
+        [syncDiscoverButton, syncRunQueueButton, syncDiscoverRunButton, refreshSyncButton].forEach((button) => {
+          if (button) {
+            button.disabled = disabled;
+          }
+        });
+      }
+
+      function startSyncPolling() {
+        syncState.actionCount += 1;
+        setSyncButtonsDisabled(true);
+        if (!syncState.pollTimer) {
+          syncState.pollTimer = window.setInterval(() => {
+            void refreshSyncLiveState();
+          }, 2000);
+        }
+        void refreshSyncLiveState();
+      }
+
+      function stopSyncPolling() {
+        syncState.actionCount = Math.max(0, syncState.actionCount - 1);
+        if (syncState.actionCount > 0) {
+          return;
+        }
+        if (syncState.pollTimer) {
+          window.clearInterval(syncState.pollTimer);
+          syncState.pollTimer = 0;
+        }
+        setSyncButtonsDisabled(false);
+        void refreshSyncLiveState();
+      }
+
       async function loadReconcileReport() {
         reconcileMultipleGroups.innerHTML = `<div class="muted">Loading reconcile report...</div>`;
         reconcileMixedGroups.innerHTML = `<div class="muted">Loading reconcile report...</div>`;
-        const response = await fetch("/api/reconcile/report?limit=50");
+        const response = await fetch(apiPath("reconcile/report?limit=50"));
         const data = await response.json();
         if (!response.ok) {
           throw new Error(data.error || "Failed to load reconcile report");
@@ -928,7 +1061,7 @@
         syncAttemptList.innerHTML = "";
         syncSourcePageList.innerHTML = "";
         resetSourcePreview();
-        const response = await fetch(`/api/sync/tournament?braacketId=${encodeURIComponent(braacketId)}`);
+        const response = await fetch(apiPath(`sync/tournament?braacketId=${encodeURIComponent(braacketId)}`));
         const data = await response.json();
         if (!response.ok) {
           throw new Error(data.error || "Failed to load tournament detail");
@@ -940,7 +1073,7 @@
         syncState.selectedSourcePageId = sourcePageID;
         syncSourcePreviewMeta.textContent = `Loading source page #${sourcePageID}...`;
         syncSourcePreviewCode.textContent = "";
-        const response = await fetch(`/api/sync/source-page?id=${encodeURIComponent(sourcePageID)}`);
+        const response = await fetch(apiPath(`sync/source-page?id=${encodeURIComponent(sourcePageID)}`));
         const data = await response.json();
         if (!response.ok) {
           throw new Error(data.error || "Failed to load source page preview");
@@ -952,7 +1085,7 @@
       }
 
       async function runSyncAction(action, payload) {
-        const response = await fetch(`/api/sync/${action}`, {
+        const response = await fetch(apiPath(`sync/${action}`), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
@@ -964,8 +1097,19 @@
         return data;
       }
 
+      async function runSyncAdminAction(action) {
+        const response = await fetch(apiPath(`sync/${action}`), {
+          method: "POST",
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error || `Failed to ${action}`);
+        }
+        return data;
+      }
+
       async function runReconcileAction(action, payload) {
-        const response = await fetch(`/api/reconcile/${action}`, {
+        const response = await fetch(apiPath(`reconcile/${action}`), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
@@ -978,22 +1122,124 @@
       }
 
       async function loadRankings() {
-        rankingMeta.textContent = "Loading rankings...";
-        rankingPageMeta.textContent = "";
-        rankingRows.innerHTML = "";
+        const requestId = rankingState.requestId + 1;
+        rankingState.requestId = requestId;
+        rankingState.source = "live";
+        rankingState.savedRankingId = 0;
+        rankingState.savedSnapshot = null;
+        setRankingLoading(true);
+        if (rankingRows.children.length === 0) {
+          rankingMeta.textContent = "Loading rankings...";
+        } else {
+          rankingMeta.innerHTML = `${rankingMeta.innerHTML}<div class="muted ranking-loading-note">Refreshing rankings...</div>`;
+        }
         const params = new URLSearchParams(new FormData(rankingForm));
         params.set("limit", String(rankingState.limit));
         params.set("offset", String(rankingState.offset));
         params.set("includeRecords", "true");
-        const response = await fetch(`/api/rankings?${params.toString()}`);
+        try {
+          const response = await fetch(apiPath(`rankings?${params.toString()}`));
+          const data = await response.json();
+          if (requestId !== rankingState.requestId) {
+            return;
+          }
+          renderRankingResponse(data);
+        } finally {
+          if (requestId === rankingState.requestId) {
+            setRankingLoading(false);
+          }
+        }
+      }
+
+      async function loadSavedRankings() {
+        savedRankingList.innerHTML = `<div class="muted">Loading saved rankings...</div>`;
+        const response = await fetch(apiPath("saved-rankings"));
         const data = await response.json();
-        renderRankingResponse(data);
+        if (!response.ok) {
+          throw new Error(data.error || "Failed to load saved rankings");
+        }
+        renderSavedRankings(data);
+        return data;
+      }
+
+      async function saveCurrentRankingSnapshot(name) {
+        const payload = rankingPayloadFromForm();
+        payload.name = name;
+        const response = await fetch(apiPath("saved-rankings"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error || "Failed to save ranking snapshot");
+        }
+        return data;
+      }
+
+      async function openSavedRanking(id) {
+        const response = await fetch(apiPath(`saved-rankings/${id}`));
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error || "Failed to open saved ranking");
+        }
+        const snapshot = data.snapshot;
+        rankingState.source = "saved";
+        rankingState.savedRankingId = Number(data.savedRanking?.id || 0);
+        rankingState.savedSnapshot = snapshot;
+        rankingState.offset = 0;
+        applyRankingFormValues(data.savedRanking || snapshot);
+        renderCurrentRankingView();
+      }
+
+      async function setSavedRankingDefault(id) {
+        const response = await fetch(apiPath(`saved-rankings/${id}/default`), {
+          method: "POST",
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error || "Failed to set default saved ranking");
+        }
+        return data;
+      }
+
+      async function clearSavedRankingDefault(id) {
+        const response = await fetch(apiPath(`saved-rankings/${id}/default`), {
+          method: "DELETE",
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error || "Failed to clear default saved ranking");
+        }
+        return data;
+      }
+
+      async function refreshSavedRanking(id) {
+        const response = await fetch(apiPath(`saved-rankings/${id}/refresh`), {
+          method: "POST",
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error || "Failed to refresh saved ranking");
+        }
+        return data;
+      }
+
+      async function deleteSavedRanking(id) {
+        const response = await fetch(apiPath(`saved-rankings/${id}`), {
+          method: "DELETE",
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error || "Failed to delete saved ranking");
+        }
+        return data;
       }
 
       async function loadPlayers() {
         playerResults.innerHTML = `<div class="muted">Loading players...</div>`;
         const params = new URLSearchParams(new FormData(playerForm));
-        const response = await fetch(`/api/players?${params.toString()}`);
+        const response = await fetch(apiPath(`players?${params.toString()}`));
         const data = await response.json();
         renderPlayers(data);
       }
@@ -1002,20 +1248,20 @@
         regionSearchResults.innerHTML = `<div class="muted">Loading players...</div>`;
         const params = new URLSearchParams(new FormData(regionSearchForm));
         params.set("limit", "20");
-        const response = await fetch(`/api/players?${params.toString()}`);
+        const response = await fetch(apiPath(`players?${params.toString()}`));
         const data = await response.json();
         renderRegionSearch(data);
       }
 
       async function loadRegions() {
         regionList.innerHTML = `<div class="muted">Loading regions...</div>`;
-        const response = await fetch("/api/regions");
+        const response = await fetch(apiPath("regions"));
         const data = await response.json();
         renderRegions(data);
       }
 
       async function assignRegion(payload) {
-        const response = await fetch("/api/regions/assign", {
+        const response = await fetch(apiPath("regions/assign"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
@@ -1028,7 +1274,7 @@
       }
 
       async function unassignRegion(playerId) {
-        const response = await fetch("/api/regions/unassign", {
+        const response = await fetch(apiPath("regions/unassign"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ playerId }),
@@ -1041,7 +1287,7 @@
       }
 
       async function deleteRegion(region) {
-        const response = await fetch("/api/regions/delete", {
+        const response = await fetch(apiPath("regions/delete"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ region }),
@@ -1057,6 +1303,22 @@
         event.preventDefault();
         rankingState.offset = 0;
         void loadRankings();
+      });
+
+      savedRankingForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        const name = String(new FormData(savedRankingForm).get("name") || "").trim();
+        savedRankingFeedback.textContent = `Saving snapshot ${name || ""}...`;
+        void (async () => {
+          try {
+            const data = await saveCurrentRankingSnapshot(name);
+            savedRankingFeedback.textContent = `Saved snapshot ${data.savedRanking.name}.`;
+            savedRankingForm.reset();
+            await loadSavedRankings();
+          } catch (error) {
+            savedRankingFeedback.textContent = error instanceof Error ? error.message : String(error);
+          }
+        })();
       });
 
       syncFilterForm.addEventListener("submit", (event) => {
@@ -1146,6 +1408,60 @@
         void loadSyncDiagnostics();
       });
 
+      syncDiscoverButton.addEventListener("click", () => {
+        if (!window.confirm("Run tournament discovery against the league listing now?")) {
+          return;
+        }
+        syncActionFeedback.textContent = "Running discovery...";
+        void (async () => {
+          startSyncPolling();
+          try {
+            const data = await runSyncAdminAction("discover");
+            syncActionFeedback.textContent = data.summary || `Discovered ${data.discoveredCount || 0} tournament(s).`;
+          } catch (error) {
+            syncActionFeedback.textContent = error instanceof Error ? error.message : String(error);
+          } finally {
+            stopSyncPolling();
+          }
+        })();
+      });
+
+      syncRunQueueButton.addEventListener("click", () => {
+        if (!window.confirm("Run queue sync across all discovered and queued tournaments now?")) {
+          return;
+        }
+        syncActionFeedback.textContent = "Running queue sync...";
+        void (async () => {
+          startSyncPolling();
+          try {
+            const data = await runSyncAdminAction("run");
+            syncActionFeedback.textContent = data.summary || "Queue sync completed.";
+          } catch (error) {
+            syncActionFeedback.textContent = error instanceof Error ? error.message : String(error);
+          } finally {
+            stopSyncPolling();
+          }
+        })();
+      });
+
+      syncDiscoverRunButton.addEventListener("click", () => {
+        if (!window.confirm("Run discovery first and then drain the queue now?")) {
+          return;
+        }
+        syncActionFeedback.textContent = "Running discovery and queue sync...";
+        void (async () => {
+          startSyncPolling();
+          try {
+            const data = await runSyncAdminAction("discover-run");
+            syncActionFeedback.textContent = data.summary || "Discovery and queue sync completed.";
+          } catch (error) {
+            syncActionFeedback.textContent = error instanceof Error ? error.message : String(error);
+          } finally {
+            stopSyncPolling();
+          }
+        })();
+      });
+
       refreshReconcileButton.addEventListener("click", () => {
         void loadReconcileReport().catch((error) => {
           reconcileFeedback.textContent = error instanceof Error ? error.message : String(error);
@@ -1187,6 +1503,7 @@
 
         syncActionFeedback.textContent = `${humanizeState(action)} ${target}...`;
         void (async () => {
+          startSyncPolling();
           try {
             await runSyncAction(action, { braacketId: target, force });
             syncActionFeedback.textContent =
@@ -1195,12 +1512,109 @@
                 : action === "import"
                   ? `Imported ${target}.`
                   : `Requeued ${target}.`;
-            await loadSyncDiagnostics();
-            if (syncState.selectedBraacketId === target) {
-              await loadSyncTournamentDetail(target);
-            }
           } catch (error) {
             syncActionFeedback.textContent = error instanceof Error ? error.message : String(error);
+          } finally {
+            stopSyncPolling();
+          }
+        })();
+      });
+
+      savedRankingList.addEventListener("click", (event) => {
+        const openButton = event.target.closest("button[data-saved-open]");
+        if (openButton) {
+          const id = Number(openButton.dataset.savedOpen);
+          if (id) {
+            savedRankingFeedback.textContent = `Opening saved snapshot #${id}...`;
+            void openSavedRanking(id)
+              .then(() => {
+                savedRankingFeedback.textContent = `Opened saved snapshot #${id}.`;
+              })
+              .catch((error) => {
+                savedRankingFeedback.textContent = error instanceof Error ? error.message : String(error);
+              });
+          }
+          return;
+        }
+
+        const defaultButton = event.target.closest("button[data-saved-default]");
+        if (defaultButton) {
+          const id = Number(defaultButton.dataset.savedDefault);
+          const isDefault = defaultButton.dataset.savedIsDefault === "true";
+          if (!id) {
+            return;
+          }
+          savedRankingFeedback.textContent = isDefault
+            ? `Clearing default snapshot #${id}...`
+            : `Setting default snapshot #${id}...`;
+          void (async () => {
+            try {
+              const data = isDefault
+                ? await clearSavedRankingDefault(id)
+                : await setSavedRankingDefault(id);
+              savedRankingFeedback.textContent = isDefault
+                ? `Cleared default snapshot ${data.savedRanking.name}.`
+                : `Set default snapshot ${data.savedRanking.name}.`;
+              await loadSavedRankings();
+            } catch (error) {
+              savedRankingFeedback.textContent = error instanceof Error ? error.message : String(error);
+            }
+          })();
+          return;
+        }
+
+        const refreshButton = event.target.closest("button[data-saved-refresh]");
+        if (refreshButton) {
+          const id = Number(refreshButton.dataset.savedRefresh);
+          if (!id) {
+            return;
+          }
+          savedRankingFeedback.textContent = `Refreshing saved snapshot #${id}...`;
+          void (async () => {
+            try {
+              const data = await refreshSavedRanking(id);
+              savedRankingFeedback.textContent = `Refreshed snapshot ${data.savedRanking.name}.`;
+              await loadSavedRankings();
+              if (rankingState.source === "saved" && rankingState.savedRankingId === id) {
+                rankingState.savedSnapshot = data.snapshot;
+                rankingState.offset = 0;
+                applyRankingFormValues(data.savedRanking || data.snapshot);
+                renderCurrentRankingView();
+              }
+            } catch (error) {
+              savedRankingFeedback.textContent = error instanceof Error ? error.message : String(error);
+            }
+          })();
+          return;
+        }
+
+        const deleteButton = event.target.closest("button[data-saved-delete]");
+        if (!deleteButton) {
+          return;
+        }
+        const id = Number(deleteButton.dataset.savedDelete);
+        const name = deleteButton.dataset.savedName || `#${id}`;
+        if (!id) {
+          return;
+        }
+        if (!window.confirm(`Delete saved ranking ${name}?`)) {
+          return;
+        }
+        savedRankingFeedback.textContent = `Deleting saved snapshot ${name}...`;
+        void (async () => {
+          try {
+            await deleteSavedRanking(id);
+            savedRankingFeedback.textContent = `Deleted saved snapshot ${name}.`;
+            if (rankingState.source === "saved" && rankingState.savedRankingId === id) {
+              rankingState.source = "live";
+              rankingState.savedRankingId = 0;
+              rankingState.savedSnapshot = null;
+              rankingState.offset = 0;
+              await loadRankings();
+            }
+            await loadSavedRankings();
+          } catch (error) {
+            savedRankingFeedback.textContent = error instanceof Error ? error.message : String(error);
           }
         })();
       });
@@ -1260,12 +1674,12 @@
 
       previousPageButton.addEventListener("click", () => {
         rankingState.offset = Math.max(0, rankingState.offset - rankingState.limit);
-        void loadRankings();
+        void renderCurrentRankingView();
       });
 
       nextPageButton.addEventListener("click", () => {
         rankingState.offset += rankingState.limit;
-        void loadRankings();
+        void renderCurrentRankingView();
       });
 
       rankingRows.addEventListener("click", (event) => {
@@ -1276,8 +1690,9 @@
             return;
           }
           const state = rankingDetailState.get(playerKey) || { open: false, sort: "rank", desc: false };
-          rankingDetailState.set(playerKey, { ...state, open: !state.open });
-          void loadRankings();
+          const nextState = { ...state, open: !state.open };
+          rankingDetailState.set(playerKey, nextState);
+          updateRankingDetailRow(playerKey, detailButton.closest("tr"), nextState);
           return;
         }
 
@@ -1297,13 +1712,102 @@
           ? { ...state, open: true, desc: !state.desc }
           : { ...state, open: true, sort: sortName, desc: sortName === "record" };
         rankingDetailState.set(playerKey, nextState);
-        void loadRankings();
+        updateRankingDetailRow(playerKey, rankingRow, nextState);
       });
+
+      function rankingPayloadFromForm() {
+        return {
+          system: String(rankingForm.elements.system.value || ""),
+          startDate: String(rankingForm.elements.startDate.value || ""),
+          endDate: String(rankingForm.elements.endDate.value || ""),
+          minTournaments: Number(rankingForm.elements.minTournaments.value || 0),
+          tournamentNameLike: String(rankingForm.elements.tournamentNameLike.value || ""),
+        };
+      }
+
+      function applyRankingFormValues(data) {
+        rankingForm.elements.system.value = String(data.system || "colley");
+        rankingForm.elements.startDate.value = String(data.startDate || "");
+        rankingForm.elements.endDate.value = String(data.endDate || "");
+        rankingForm.elements.minTournaments.value = String(data.minTournaments || 3);
+        rankingForm.elements.tournamentNameLike.value = String(data.tournamentNameLike || "");
+      }
+
+      function pagedSavedSnapshot(snapshot) {
+        const players = Array.isArray(snapshot?.players) ? snapshot.players : [];
+        const page = players.slice(rankingState.offset, rankingState.offset + rankingState.limit);
+        return {
+          ...snapshot,
+          players: page,
+          offset: rankingState.offset,
+          limit: rankingState.limit,
+          returnedPlayers: page.length,
+          totalPlayers: Number(snapshot?.totalPlayers || players.length),
+          includeRecords: true,
+          source: "saved",
+        };
+      }
+
+      async function renderCurrentRankingView() {
+        if (rankingState.source === "saved" && rankingState.savedSnapshot) {
+          renderRankingResponse(pagedSavedSnapshot(rankingState.savedSnapshot));
+          return;
+        }
+        await loadRankings();
+      }
+
+      async function initializeRankings() {
+        const data = await loadSavedRankings();
+        const items = Array.isArray(data.savedRankings) ? data.savedRankings : [];
+        const defaultSavedRanking = items.find((item) => item.isDefault);
+        if (defaultSavedRanking?.id) {
+          await openSavedRanking(defaultSavedRanking.id);
+          savedRankingFeedback.textContent = `Loaded default snapshot ${defaultSavedRanking.name}.`;
+          return;
+        }
+        await loadRankings();
+      }
+
+      function updateRankingDetailRow(playerKey, rankingRow, detailState) {
+        if (!rankingRow) {
+          return;
+        }
+        const detailToggle = rankingRow.querySelector(".ranking-detail-toggle");
+        const detailRow = rankingRow.nextElementSibling;
+        if (!detailToggle || !detailRow || !detailRow.classList.contains("ranking-detail-row")) {
+          return;
+        }
+        const records = rankingRecordsByPlayer.get(playerKey) || [];
+        detailToggle.textContent = detailState.open ? "Hide H2H" : "Show H2H";
+        detailToggle.setAttribute("aria-expanded", detailState.open ? "true" : "false");
+        detailRow.classList.toggle("is-open", detailState.open);
+        detailRow.hidden = !detailState.open;
+        if (!detailState.open) {
+          return;
+        }
+        const detailCell = detailRow.querySelector("td");
+        if (!detailCell) {
+          return;
+        }
+        detailCell.innerHTML = renderH2HDetail(records, detailState);
+      }
+
+      function setRankingLoading(isLoading) {
+        rankingState.loading = isLoading;
+        if (rankingSubmitButton) {
+          rankingSubmitButton.disabled = isLoading;
+        }
+        rankingTableWrap.classList.toggle("is-loading", isLoading);
+      }
 
       function humanizeState(value) {
         return String(value || "")
           .replaceAll("_", " ")
           .replace(/\b\w/g, (character) => character.toUpperCase());
+      }
+
+      function apiPath(path) {
+        return new URL(String(path || "").replace(/^\//, ""), apiRoot).toString();
       }
 
       function formatDateTime(value) {
@@ -1413,7 +1917,7 @@
       void loadOverview();
       void loadSyncDiagnostics();
       void loadReconcileReport();
-      void loadRankings();
+      void initializeRankings();
       void loadPlayers();
       void loadRegionSearch();
       void loadRegions();

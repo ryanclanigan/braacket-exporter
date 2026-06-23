@@ -239,11 +239,27 @@ button {
   overflow-x: auto;
 }
 
+.table-wrap.is-loading {
+  opacity: 0.72;
+  transition: opacity 120ms ease;
+}
+
+.ranking-loading-note {
+  margin-top: 4px;
+}
+
 .sync-grid {
   margin-top: 22px;
   display: grid;
   grid-template-columns: 0.9fr 1.3fr;
   gap: 18px;
+}
+
+.sync-admin-actions {
+  margin-top: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .identity-grid {
@@ -391,6 +407,39 @@ button {
   gap: 12px;
 }
 
+.saved-rankings-panel {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.saved-ranking-list {
+  display: grid;
+  gap: 12px;
+}
+
+.saved-ranking-card {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--panel-strong);
+}
+
+.saved-ranking-default {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #fff1bf;
+  color: #7a5200;
+  font-size: 0.74rem;
+  font-weight: 700;
+  vertical-align: middle;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
@@ -412,54 +461,73 @@ th {
 }
 
 .ranking-actions-cell {
-  width: 120px;
+  width: 108px;
 }
 
 .ranking-detail-row td {
   padding-top: 0;
+  padding-left: 8px;
+  padding-right: 8px;
   background: rgba(255, 250, 240, 0.45);
 }
 
 .ranking-h2h-panel {
   display: grid;
-  gap: 12px;
-  padding: 14px 4px 4px;
+  gap: 8px;
+  padding: 10px 2px 2px;
 }
 
 .ranking-h2h-toolbar {
   display: flex;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
   align-items: center;
+}
+
+.ranking-h2h-heading {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: baseline;
 }
 
 .ranking-h2h-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
 }
 
 .ranking-h2h-list {
   display: grid;
-  gap: 8px;
+  gap: 4px;
 }
 
 .ranking-h2h-item {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
+  display: grid;
+  grid-template-columns: 34px minmax(0, auto) auto auto;
+  justify-content: start;
+  gap: 6px;
   align-items: center;
-  padding: 12px 14px;
-  border-radius: 16px;
+  padding: 7px 8px;
+  border-radius: 10px;
   border: 1px solid var(--line);
   background: var(--h2h-bg, var(--panel-strong));
 }
 
+.ranking-h2h-rank {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--ink-soft);
+  text-align: left;
+}
+
 .ranking-h2h-score {
   display: flex;
-  gap: 6px;
+  gap: 4px;
   align-items: baseline;
   font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .ranking-h2h-score .wins {
@@ -471,9 +539,21 @@ th {
 }
 
 .ranking-h2h-opponent {
-  display: grid;
-  justify-items: end;
-  text-align: right;
+  min-width: 0;
+  max-width: 220px;
+}
+
+.ranking-h2h-opponent strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ranking-h2h-summary {
+  font-size: 0.82rem;
+  white-space: nowrap;
+  margin-left: 2px;
 }
 
 .player-list {
