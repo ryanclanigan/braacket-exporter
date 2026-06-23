@@ -47,7 +47,7 @@ go run ./cmd/sync discover --league another-league
 
 ### `go run ./cmd/server`
 
-Starts the Tornee UI and JSON API on `:8080` by default.
+Starts the Tourknee UI and JSON API on `:8080` by default.
 
 Environment:
 
@@ -186,6 +186,43 @@ Example scoped to one tournament family:
 ```bash
 go run ./cmd/rank colley --start-date 2026-01-01 --end-date 2026-06-30 --min-tournaments 3 --tournament-name-like "Wednesday" --export ./exports/h1-2026-wednesdays.json
 ```
+
+## Tourknee Deploy Helpers
+
+The repo includes a few shell helpers for the production Tourknee instance:
+
+- `scripts/deploy-tourknee.sh`
+  Builds and deploys the app, SQLite DB, service unit, and nginx config to the remote host.
+- `scripts/sync-tourknee-prod.sh`
+  Runs remote discovery and sync commands against the deployed instance over SSH.
+- `scripts/sync-tourknee-db.sh`
+  Syncs the SQLite DB between local and remote so either side can be treated as the source of truth.
+
+Examples:
+
+```bash
+scripts/sync-tourknee-db.sh pull
+scripts/sync-tourknee-db.sh push
+scripts/sync-tourknee-db.sh pull --include-cookie-jar
+```
+
+Behavior:
+
+- `pull` backs up the current local DB, snapshots the remote SQLite DB with `sqlite3 .backup`, then replaces the local DB with that remote snapshot.
+- `push` snapshots the current local DB, backs up the remote DB, stops `tourknee`, replaces the remote DB, and starts `tourknee` again.
+- timestamped backups are written under `.tmp/tourknee-db-sync/` locally and `/home/ec2-user/tourknee/backups/` remotely by default.
+
+Useful environment overrides:
+
+- `LOCAL_DB_PATH`
+- `LOCAL_COOKIE_JAR_PATH`
+- `REMOTE_DB_PATH`
+- `REMOTE_COOKIE_JAR_PATH`
+- `REMOTE_APP_DIR`
+- `REMOTE_SERVICE`
+- `REMOTE_HOST`
+- `REMOTE_USER`
+- `REMOTE_SSH_KEY`
 
 ### `go run ./cmd/reconcile identities [--limit <n>]`
 
