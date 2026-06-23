@@ -5,6 +5,7 @@ import (
 	"braacketreplacement/internal/elo"
 	"braacketreplacement/internal/reconcile"
 	"braacketreplacement/internal/regions"
+	"braacketreplacement/internal/savedrankings"
 	"braacketreplacement/internal/synccore"
 	"braacketreplacement/internal/trueskill"
 	"database/sql"
@@ -39,6 +40,8 @@ type app struct {
 }
 
 type syncRunner interface {
+	Discover() (int, error)
+	Run() error
 	SyncEvent(idOrURL string, force bool) error
 	ResetEvent(idOrURL string) error
 	RequeueEvent(idOrURL string) error
@@ -83,7 +86,22 @@ type rankingResponse struct {
 	TotalPlayers       int         `json:"totalPlayers,omitempty"`
 	IncludeRecords     bool        `json:"includeRecords"`
 	GeneratedAt        string      `json:"generatedAt"`
+	Source             string      `json:"source,omitempty"`
+	SavedRankingID     int         `json:"savedRankingId,omitempty"`
+	SavedRankingName   string      `json:"savedRankingName,omitempty"`
+	SavedAt            string      `json:"savedAt,omitempty"`
 	Players            interface{} `json:"players"`
+}
+
+type rankingQuery struct {
+	System             string
+	StartDate          string
+	EndDate            string
+	MinTournaments     int
+	TournamentNameLike string
+	Limit              int
+	Offset             int
+	IncludeRecords     bool
 }
 
 type syncRunResponse struct {
@@ -217,11 +235,16 @@ func main() {
 	mux.HandleFunc("/api/regions/unassign", server.handleUnassignRegion)
 	mux.HandleFunc("/api/regions/delete", server.handleDeleteRegion)
 	mux.HandleFunc("/api/rankings", server.handleRankings)
+	mux.HandleFunc("/api/saved-rankings", server.handleSavedRankings)
+	mux.HandleFunc("/api/saved-rankings/", server.handleSavedRankingByID)
 	mux.HandleFunc("/api/sync/summary", server.handleSyncSummary)
 	mux.HandleFunc("/api/sync/runs", server.handleSyncRuns)
 	mux.HandleFunc("/api/sync/tournaments", server.handleSyncTournaments)
 	mux.HandleFunc("/api/sync/tournament", server.handleSyncTournamentDetail)
 	mux.HandleFunc("/api/sync/source-page", server.handleSyncSourcePageDetail)
+	mux.HandleFunc("/api/sync/discover", server.handleSyncDiscover)
+	mux.HandleFunc("/api/sync/run", server.handleSyncRun)
+	mux.HandleFunc("/api/sync/discover-run", server.handleSyncDiscoverRun)
 	mux.HandleFunc("/api/sync/requeue", server.handleSyncRequeue)
 	mux.HandleFunc("/api/sync/reset", server.handleSyncReset)
 	mux.HandleFunc("/api/sync/import", server.handleSyncImport)
@@ -230,7 +253,7 @@ func main() {
 	mux.HandleFunc("/api/reconcile/fix-multiple-league-ids", server.handleReconcileFixMultipleLeagueIDs)
 	mux.Handle("/", server.staticHandler())
 
-	log.Printf("tornee server listening on %s", server.addr)
+	log.Printf("tourknee server listening on %s", server.addr)
 	log.Printf("using db at %s", server.dbPath)
 	if err := http.ListenAndServe(server.addr, requestLogMiddleware(mux)); err != nil {
 		log.Fatal(err)
@@ -532,70 +555,214 @@ func (a *app) handleDeleteRegion(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *app) handleRankings(w http.ResponseWriter, r *http.Request) {
-	values := r.URL.Query()
-	system := strings.ToLower(strings.TrimSpace(values.Get("system")))
-	if system == "" {
-		system = "colley"
-	}
-
-	startDate := defaultDate(values.Get("startDate"), time.Now().AddDate(0, -6, 0))
-	endDate := defaultDate(values.Get("endDate"), time.Now())
-	minTournaments := atoiSafe(values.Get("minTournaments"))
-	if minTournaments < 1 {
-		minTournaments = 3
-	}
-	nameLike := strings.TrimSpace(values.Get("tournamentNameLike"))
-	limit := atoiSafe(values.Get("limit"))
-	if limit < 1 || limit > 100 {
-		limit = 50
-	}
-	offset := atoiSafe(values.Get("offset"))
-	if offset < 0 {
-		offset = 0
-	}
-	includeRecords := parseBoolFlag(values.Get("includeRecords"))
-
-	if system != "colley" && system != "elo" && system != "trueskill" {
+	query, err := parseRankingQuery(r.URL.Query(), false)
+	if err != nil {
 		writeJSON(w, http.StatusNotImplemented, rankingResponse{
-			System:             system,
+			System:             firstNonEmpty(strings.ToLower(strings.TrimSpace(r.URL.Query().Get("system"))), "colley"),
 			Status:             "planned",
 			Message:            "Unsupported ranking system. Available systems today are Colley, Elo, and TrueSkill.",
-			StartDate:          startDate,
-			EndDate:            endDate,
-			MinTournaments:     minTournaments,
-			TournamentNameLike: nameLike,
-			Limit:              limit,
-			Offset:             offset,
-			IncludeRecords:     includeRecords,
+			StartDate:          defaultDate(r.URL.Query().Get("startDate"), time.Now().AddDate(0, -6, 0)),
+			EndDate:            defaultDate(r.URL.Query().Get("endDate"), time.Now()),
+			MinTournaments:     defaultMinTournaments(r.URL.Query().Get("minTournaments")),
+			TournamentNameLike: strings.TrimSpace(r.URL.Query().Get("tournamentNameLike")),
+			Limit:              defaultLimit(r.URL.Query().Get("limit")),
+			Offset:             defaultOffset(r.URL.Query().Get("offset")),
+			IncludeRecords:     parseBoolFlag(r.URL.Query().Get("includeRecords")),
 			GeneratedAt:        time.Now().UTC().Format(time.RFC3339),
 			Players:            []interface{}{},
 		})
 		return
 	}
 
-	fullPlayers, generatedAt, err := a.getRankingPlayers(system, startDate, endDate, minTournaments, nameLike)
+	fullPlayers, generatedAt, err := a.getRankingPlayers(query.System, query.StartDate, query.EndDate, query.MinTournaments, query.TournamentNameLike)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	totalPlayers := len(fullPlayers)
-	page := paginatePlayers(fullPlayers, offset, limit, includeRecords)
+	writeJSON(w, http.StatusOK, a.buildRankingResponse(query, fullPlayers, generatedAt, "live", 0, "", ""))
+}
 
-	writeJSON(w, http.StatusOK, rankingResponse{
-		System:             system,
-		Status:             "ready",
-		StartDate:          startDate,
-		EndDate:            endDate,
-		MinTournaments:     minTournaments,
-		TournamentNameLike: nameLike,
-		Limit:              limit,
-		Offset:             offset,
-		ReturnedPlayers:    len(page),
-		TotalPlayers:       totalPlayers,
-		IncludeRecords:     includeRecords,
-		GeneratedAt:        generatedAt.Format(time.RFC3339),
-		Players:            page,
-	})
+func (a *app) handleSavedRankings(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		service, err := openSavedRankingService(a.dbPath)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		defer service.Close()
+		items, err := service.List()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"savedRankings": items})
+	case http.MethodPost:
+		var request struct {
+			Name string `json:"name"`
+			rankingQuery
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		if strings.TrimSpace(request.Name) == "" {
+			writeError(w, http.StatusBadRequest, savedrankings.ErrInvalidName)
+			return
+		}
+		query, err := normalizeRankingQuery(request.rankingQuery, true)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		snapshot, err := a.computeSavedRankingSnapshot(query)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		service, err := openSavedRankingService(a.dbPath)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		defer service.Close()
+		entry, err := service.Create(request.Name, savedrankings.Query{
+			System:             query.System,
+			StartDate:          query.StartDate,
+			EndDate:            query.EndDate,
+			MinTournaments:     query.MinTournaments,
+			TournamentNameLike: query.TournamentNameLike,
+		}, snapshot)
+		if err != nil {
+			status := http.StatusInternalServerError
+			if errors.Is(err, savedrankings.ErrInvalidName) {
+				status = http.StatusBadRequest
+			}
+			writeError(w, status, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, map[string]any{
+			"savedRanking": savedRankingResponse(entry),
+			"snapshot":     a.savedSnapshotResponse(entry),
+		})
+	default:
+		writeError(w, http.StatusMethodNotAllowed, fmt.Errorf("method not allowed"))
+	}
+}
+
+func (a *app) handleSavedRankingByID(w http.ResponseWriter, r *http.Request) {
+	service, err := openSavedRankingService(a.dbPath)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	defer service.Close()
+
+	path := strings.TrimPrefix(r.URL.Path, "/api/saved-rankings/")
+	path = strings.Trim(path, "/")
+	if path == "" {
+		writeError(w, http.StatusNotFound, fmt.Errorf("saved ranking not found"))
+		return
+	}
+
+	if strings.HasSuffix(path, "/refresh") {
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, fmt.Errorf("method not allowed"))
+			return
+		}
+		id := atoiSafe(strings.TrimSuffix(path, "/refresh"))
+		if id < 1 {
+			writeError(w, http.StatusNotFound, fmt.Errorf("saved ranking not found"))
+			return
+		}
+		entry, err := service.Get(id)
+		if err != nil {
+			a.writeSavedRankingError(w, err)
+			return
+		}
+		snapshot, err := a.computeSavedRankingSnapshot(rankingQuery{
+			System:             entry.Query.System,
+			StartDate:          entry.Query.StartDate,
+			EndDate:            entry.Query.EndDate,
+			MinTournaments:     entry.Query.MinTournaments,
+			TournamentNameLike: entry.Query.TournamentNameLike,
+			IncludeRecords:     true,
+			Limit:              50,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		updated, err := service.UpdateSnapshot(id, snapshot)
+		if err != nil {
+			a.writeSavedRankingError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"savedRanking": savedRankingResponse(updated),
+			"snapshot":     a.savedSnapshotResponse(updated),
+		})
+		return
+	}
+
+	if strings.HasSuffix(path, "/default") {
+		id := atoiSafe(strings.TrimSuffix(path, "/default"))
+		if id < 1 {
+			writeError(w, http.StatusNotFound, fmt.Errorf("saved ranking not found"))
+			return
+		}
+		switch r.Method {
+		case http.MethodPost:
+			entry, err := service.SetDefault(id)
+			if err != nil {
+				a.writeSavedRankingError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"savedRanking": savedRankingResponse(entry),
+			})
+		case http.MethodDelete:
+			entry, err := service.ClearDefault(id)
+			if err != nil {
+				a.writeSavedRankingError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"savedRanking": savedRankingResponse(entry),
+			})
+		default:
+			writeError(w, http.StatusMethodNotAllowed, fmt.Errorf("method not allowed"))
+		}
+		return
+	}
+
+	id := atoiSafe(path)
+	if id < 1 {
+		writeError(w, http.StatusNotFound, fmt.Errorf("saved ranking not found"))
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		entry, err := service.Get(id)
+		if err != nil {
+			a.writeSavedRankingError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"savedRanking": savedRankingResponse(entry),
+			"snapshot":     a.savedSnapshotResponse(entry),
+		})
+	case http.MethodDelete:
+		err := service.Delete(id)
+		if err != nil {
+			a.writeSavedRankingError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "id": id})
+	default:
+		writeError(w, http.StatusMethodNotAllowed, fmt.Errorf("method not allowed"))
+	}
 }
 
 func (a *app) handleSyncSummary(w http.ResponseWriter, r *http.Request) {
@@ -853,6 +1020,77 @@ func (a *app) handleSyncRequeue(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (a *app) handleSyncDiscover(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, fmt.Errorf("method not allowed"))
+		return
+	}
+	runner, err := a.newSyncRunner()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	discoveredCount, err := runner.Discover()
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":          "ok",
+		"action":          "discover",
+		"discoveredCount": discoveredCount,
+		"summary":         fmt.Sprintf("Discovered %d tournament(s)", discoveredCount),
+	})
+}
+
+func (a *app) handleSyncRun(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, fmt.Errorf("method not allowed"))
+		return
+	}
+	runner, err := a.newSyncRunner()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if err := runner.Run(); err != nil {
+		writeError(w, http.StatusBadGateway, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":  "ok",
+		"action":  "run",
+		"summary": "Queue sync completed.",
+	})
+}
+
+func (a *app) handleSyncDiscoverRun(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, fmt.Errorf("method not allowed"))
+		return
+	}
+	runner, err := a.newSyncRunner()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	discoveredCount, err := runner.Discover()
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err)
+		return
+	}
+	if err := runner.Run(); err != nil {
+		writeError(w, http.StatusBadGateway, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":          "ok",
+		"action":          "discover-run",
+		"discoveredCount": discoveredCount,
+		"summary":         fmt.Sprintf("Discovered %d tournament(s) and completed queue sync.", discoveredCount),
+	})
+}
+
 func (a *app) handleSyncReset(w http.ResponseWriter, r *http.Request) {
 	a.handleSyncAction(w, r, "reset", func(runner syncRunner, target string, force bool) error {
 		return runner.ResetEvent(target)
@@ -963,6 +1201,21 @@ func (a *app) getRankingPlayers(system string, startDate string, endDate string,
 		return cached.players, cached.generatedAt, nil
 	}
 
+	players, generatedAt, err := a.computeRankingPlayers(system, startDate, endDate, minTournaments, tournamentNameLike)
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	a.cache.mu.Lock()
+	a.cache.items[cacheKey] = cachedRankingResult{
+		generatedAt: generatedAt,
+		players:     players,
+	}
+	a.cache.mu.Unlock()
+	return players, generatedAt, nil
+}
+
+func (a *app) computeRankingPlayers(system string, startDate string, endDate string, minTournaments int, tournamentNameLike string) ([]map[string]interface{}, time.Time, error) {
+
 	var (
 		players []map[string]interface{}
 		err     error
@@ -980,15 +1233,114 @@ func (a *app) getRankingPlayers(system string, startDate string, endDate string,
 	if err != nil {
 		return nil, time.Time{}, err
 	}
-
 	generatedAt := time.Now().UTC()
+	return players, generatedAt, nil
+}
+
+func (a *app) computeSavedRankingSnapshot(query rankingQuery) (savedrankings.Snapshot, error) {
+	fullPlayers, generatedAt, err := a.computeRankingPlayers(query.System, query.StartDate, query.EndDate, query.MinTournaments, query.TournamentNameLike)
+	if err != nil {
+		return savedrankings.Snapshot{}, err
+	}
+	cacheKey := strings.Join([]string{
+		query.System,
+		query.StartDate,
+		query.EndDate,
+		strconv.Itoa(query.MinTournaments),
+		query.TournamentNameLike,
+	}, "::")
 	a.cache.mu.Lock()
 	a.cache.items[cacheKey] = cachedRankingResult{
 		generatedAt: generatedAt,
-		players:     players,
+		players:     fullPlayers,
 	}
 	a.cache.mu.Unlock()
-	return players, generatedAt, nil
+	fullPage := paginatePlayers(fullPlayers, 0, len(fullPlayers), true)
+	return savedrankings.Snapshot{
+		System:             query.System,
+		Status:             "ready",
+		StartDate:          query.StartDate,
+		EndDate:            query.EndDate,
+		MinTournaments:     query.MinTournaments,
+		TournamentNameLike: query.TournamentNameLike,
+		ReturnedPlayers:    len(fullPage),
+		TotalPlayers:       len(fullPage),
+		IncludeRecords:     true,
+		GeneratedAt:        generatedAt.Format(time.RFC3339),
+		Players:            fullPage,
+	}, nil
+}
+
+func (a *app) buildRankingResponse(query rankingQuery, fullPlayers []map[string]interface{}, generatedAt time.Time, source string, savedRankingID int, savedRankingName string, savedAt string) rankingResponse {
+	page := paginatePlayers(fullPlayers, query.Offset, query.Limit, query.IncludeRecords)
+	return rankingResponse{
+		System:             query.System,
+		Status:             "ready",
+		StartDate:          query.StartDate,
+		EndDate:            query.EndDate,
+		MinTournaments:     query.MinTournaments,
+		TournamentNameLike: query.TournamentNameLike,
+		Limit:              query.Limit,
+		Offset:             query.Offset,
+		ReturnedPlayers:    len(page),
+		TotalPlayers:       len(fullPlayers),
+		IncludeRecords:     query.IncludeRecords,
+		GeneratedAt:        generatedAt.Format(time.RFC3339),
+		Source:             source,
+		SavedRankingID:     savedRankingID,
+		SavedRankingName:   savedRankingName,
+		SavedAt:            savedAt,
+		Players:            page,
+	}
+}
+
+func (a *app) savedSnapshotResponse(entry savedrankings.Entry) rankingResponse {
+	return rankingResponse{
+		System:             entry.Snapshot.System,
+		Status:             entry.Snapshot.Status,
+		StartDate:          entry.Query.StartDate,
+		EndDate:            entry.Query.EndDate,
+		MinTournaments:     entry.Query.MinTournaments,
+		TournamentNameLike: entry.Query.TournamentNameLike,
+		Limit:              len(entry.Snapshot.Players),
+		Offset:             0,
+		ReturnedPlayers:    entry.Snapshot.ReturnedPlayers,
+		TotalPlayers:       entry.Snapshot.TotalPlayers,
+		IncludeRecords:     true,
+		GeneratedAt:        entry.Snapshot.GeneratedAt,
+		Source:             "saved",
+		SavedRankingID:     entry.ID,
+		SavedRankingName:   entry.Name,
+		SavedAt:            entry.SavedAt,
+		Players:            entry.Snapshot.Players,
+	}
+}
+
+func savedRankingResponse(entry savedrankings.Entry) map[string]any {
+	return map[string]any{
+		"id":                 entry.ID,
+		"name":               entry.Name,
+		"system":             entry.Query.System,
+		"startDate":          entry.Query.StartDate,
+		"endDate":            entry.Query.EndDate,
+		"minTournaments":     entry.Query.MinTournaments,
+		"tournamentNameLike": entry.Query.TournamentNameLike,
+		"savedAt":            entry.SavedAt,
+		"generatedAt":        entry.Snapshot.GeneratedAt,
+		"totalPlayers":       entry.Snapshot.TotalPlayers,
+		"isDefault":          entry.IsDefault,
+	}
+}
+
+func (a *app) writeSavedRankingError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, savedrankings.ErrNotFound):
+		writeError(w, http.StatusNotFound, err)
+	case errors.Is(err, savedrankings.ErrInvalidName):
+		writeError(w, http.StatusBadRequest, err)
+	default:
+		writeError(w, http.StatusInternalServerError, err)
+	}
 }
 
 func (a *app) staticHandler() http.Handler {
@@ -1172,6 +1524,18 @@ func openAppDB(dbPath string) (*sql.DB, error) {
 	return db, nil
 }
 
+func openSavedRankingService(dbPath string) (*savedrankings.Service, error) {
+	db, err := openAppDB(dbPath)
+	if err != nil {
+		return nil, err
+	}
+	if err := savedrankings.ApplySchema(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return savedrankings.NewService(db), nil
+}
+
 func atoiSafe(value string) int {
 	number, err := strconv.Atoi(strings.TrimSpace(value))
 	if err != nil {
@@ -1187,6 +1551,94 @@ func parseBoolFlag(value string) bool {
 	default:
 		return false
 	}
+}
+
+func parseRankingQuery(values url.Values, strict bool) (rankingQuery, error) {
+	return normalizeRankingQuery(rankingQuery{
+		System:             strings.ToLower(strings.TrimSpace(values.Get("system"))),
+		StartDate:          values.Get("startDate"),
+		EndDate:            values.Get("endDate"),
+		MinTournaments:     atoiSafe(values.Get("minTournaments")),
+		TournamentNameLike: strings.TrimSpace(values.Get("tournamentNameLike")),
+		Limit:              atoiSafe(values.Get("limit")),
+		Offset:             atoiSafe(values.Get("offset")),
+		IncludeRecords:     parseBoolFlag(values.Get("includeRecords")),
+	}, strict)
+}
+
+func normalizeRankingQuery(query rankingQuery, strict bool) (rankingQuery, error) {
+	if query.System == "" {
+		query.System = "colley"
+	}
+	query.System = strings.ToLower(strings.TrimSpace(query.System))
+	if query.System != "colley" && query.System != "elo" && query.System != "trueskill" {
+		return rankingQuery{}, fmt.Errorf("unsupported ranking system: %s", query.System)
+	}
+
+	if strict {
+		if strings.TrimSpace(query.StartDate) == "" || !isDateValue(query.StartDate) {
+			return rankingQuery{}, fmt.Errorf("startDate must be in YYYY-MM-DD format")
+		}
+		if strings.TrimSpace(query.EndDate) == "" || !isDateValue(query.EndDate) {
+			return rankingQuery{}, fmt.Errorf("endDate must be in YYYY-MM-DD format")
+		}
+	} else {
+		query.StartDate = defaultDate(query.StartDate, time.Now().AddDate(0, -6, 0))
+		query.EndDate = defaultDate(query.EndDate, time.Now())
+	}
+	if strict {
+		query.StartDate = strings.TrimSpace(query.StartDate)
+		query.EndDate = strings.TrimSpace(query.EndDate)
+	}
+	if query.MinTournaments < 1 {
+		if strict {
+			return rankingQuery{}, fmt.Errorf("minTournaments must be at least 1")
+		}
+		query.MinTournaments = 3
+	}
+	if query.Limit < 1 || query.Limit > 100 {
+		query.Limit = 50
+	}
+	if query.Offset < 0 {
+		query.Offset = 0
+	}
+	return query, nil
+}
+
+func isDateValue(value string) bool {
+	_, err := time.Parse("2006-01-02", strings.TrimSpace(value))
+	return err == nil
+}
+
+func firstNonEmpty(value string, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
+}
+
+func defaultMinTournaments(value string) int {
+	min := atoiSafe(value)
+	if min < 1 {
+		return 3
+	}
+	return min
+}
+
+func defaultLimit(value string) int {
+	limit := atoiSafe(value)
+	if limit < 1 || limit > 100 {
+		return 50
+	}
+	return limit
+}
+
+func defaultOffset(value string) int {
+	offset := atoiSafe(value)
+	if offset < 0 {
+		return 0
+	}
+	return offset
 }
 
 func paginatePlayers(players []map[string]interface{}, offset int, limit int, includeRecords bool) []map[string]interface{} {
@@ -1229,6 +1681,16 @@ func trimmedPreview(value string, maxLen int) string {
 type managedSyncRunner struct {
 	repo    *synccore.Repository
 	service *synccore.Service
+}
+
+func (r *managedSyncRunner) Discover() (int, error) {
+	defer r.repo.Close()
+	return r.service.Discover()
+}
+
+func (r *managedSyncRunner) Run() error {
+	defer r.repo.Close()
+	return r.service.Run()
 }
 
 func (r *managedSyncRunner) SyncEvent(idOrURL string, force bool) error {

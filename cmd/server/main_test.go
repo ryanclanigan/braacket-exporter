@@ -242,6 +242,197 @@ VALUES
 	}
 }
 
+func TestSavedRankingsAPIHandlers(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "saved-rankings.sqlite")
+	setupSQLiteFixture(t, dbPath, `
+CREATE TABLE tournaments (
+  id INTEGER PRIMARY KEY,
+  league_slug TEXT,
+  name TEXT,
+  tournament_date TEXT,
+  queue_state TEXT
+);
+CREATE TABLE players (
+  id INTEGER PRIMARY KEY,
+  canonical_name TEXT,
+  braacket_league_player_id TEXT,
+  name TEXT,
+  first_seen_at TEXT,
+  last_seen_at TEXT
+);
+CREATE TABLE tournament_players (
+  id INTEGER PRIMARY KEY,
+  tournament_id INTEGER,
+  canonical_player_id INTEGER,
+  name TEXT
+);
+CREATE TABLE matches (
+  id INTEGER PRIMARY KEY,
+  tournament_id INTEGER,
+  player1_tournament_player_id INTEGER,
+  player2_tournament_player_id INTEGER,
+  winner_tournament_player_id INTEGER,
+  player1_score INTEGER,
+  player2_score INTEGER
+);
+INSERT INTO tournaments (id, league_slug, name, tournament_date, queue_state)
+VALUES
+  (1, 'comelee', 'Weekly Wednesday #1', '2026-01-10', 'imported'),
+  (2, 'comelee', 'Weekly Wednesday #2', '2026-01-24', 'imported');
+INSERT INTO players (id, canonical_name, name, first_seen_at, last_seen_at)
+VALUES
+  (1, 'name:alice', 'Alice', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
+  (2, 'name:bob', 'Bob', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+INSERT INTO tournament_players (id, tournament_id, canonical_player_id, name)
+VALUES
+  (11, 1, 1, 'Alice'),
+  (12, 1, 2, 'Bob'),
+  (21, 2, 1, 'ALICE!'),
+  (22, 2, 2, 'Bob');
+INSERT INTO matches (id, tournament_id, player1_tournament_player_id, player2_tournament_player_id, winner_tournament_player_id, player1_score, player2_score)
+VALUES
+  (101, 1, 11, 12, 11, 3, 1),
+  (102, 2, 21, 22, 21, 3, 0);
+`)
+
+	server := &app{
+		dbPath: dbPath,
+		cache:  rankingCache{items: map[string]cachedRankingResult{}},
+	}
+
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/saved-rankings", strings.NewReader(`{
+  "name":"January Elo",
+  "system":"elo",
+  "startDate":"2026-01-01",
+  "endDate":"2026-01-31",
+  "minTournaments":1,
+  "tournamentNameLike":"Weekly"
+}`))
+	createRequest.Header.Set("Content-Type", "application/json")
+	createRecorder := httptest.NewRecorder()
+	server.handleSavedRankings(createRecorder, createRequest)
+	if createRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", createRecorder.Code, createRecorder.Body.String())
+	}
+	createBody := createRecorder.Body.String()
+	if !strings.Contains(createBody, `"name": "January Elo"`) || !strings.Contains(createBody, `"source": "saved"`) {
+		t.Fatalf("expected saved ranking payload: %s", createBody)
+	}
+	if !strings.Contains(createBody, `"isDefault": false`) {
+		t.Fatalf("expected new saved ranking to not be default: %s", createBody)
+	}
+
+	listRecorder := httptest.NewRecorder()
+	server.handleSavedRankings(listRecorder, httptest.NewRequest(http.MethodGet, "/api/saved-rankings", nil))
+	if listRecorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", listRecorder.Code, listRecorder.Body.String())
+	}
+	if !strings.Contains(listRecorder.Body.String(), `"name": "January Elo"`) {
+		t.Fatalf("expected saved ranking in list: %s", listRecorder.Body.String())
+	}
+	if !strings.Contains(listRecorder.Body.String(), `"isDefault": false`) {
+		t.Fatalf("expected saved ranking list to include default flag: %s", listRecorder.Body.String())
+	}
+
+	getRecorder := httptest.NewRecorder()
+	server.handleSavedRankingByID(getRecorder, httptest.NewRequest(http.MethodGet, "/api/saved-rankings/1", nil))
+	if getRecorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", getRecorder.Code, getRecorder.Body.String())
+	}
+	if !strings.Contains(getRecorder.Body.String(), `"players": [`) || !strings.Contains(getRecorder.Body.String(), `"ALICE!"`) {
+		t.Fatalf("expected saved snapshot players: %s", getRecorder.Body.String())
+	}
+	if !strings.Contains(getRecorder.Body.String(), `"isDefault": false`) {
+		t.Fatalf("expected saved ranking fetch to include default flag: %s", getRecorder.Body.String())
+	}
+
+	setDefaultRecorder := httptest.NewRecorder()
+	server.handleSavedRankingByID(setDefaultRecorder, httptest.NewRequest(http.MethodPost, "/api/saved-rankings/1/default", nil))
+	if setDefaultRecorder.Code != http.StatusOK {
+		t.Fatalf("expected 200 when setting default, got %d: %s", setDefaultRecorder.Code, setDefaultRecorder.Body.String())
+	}
+	if !strings.Contains(setDefaultRecorder.Body.String(), `"isDefault": true`) {
+		t.Fatalf("expected set default payload to mark default: %s", setDefaultRecorder.Body.String())
+	}
+
+	refreshRecorder := httptest.NewRecorder()
+	server.handleSavedRankingByID(refreshRecorder, httptest.NewRequest(http.MethodPost, "/api/saved-rankings/1/refresh", nil))
+	if refreshRecorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", refreshRecorder.Code, refreshRecorder.Body.String())
+	}
+	if !strings.Contains(refreshRecorder.Body.String(), `"savedRanking"`) {
+		t.Fatalf("expected refreshed saved ranking payload: %s", refreshRecorder.Body.String())
+	}
+	if !strings.Contains(refreshRecorder.Body.String(), `"isDefault": true`) {
+		t.Fatalf("expected refresh response to preserve default flag: %s", refreshRecorder.Body.String())
+	}
+
+	clearDefaultRecorder := httptest.NewRecorder()
+	server.handleSavedRankingByID(clearDefaultRecorder, httptest.NewRequest(http.MethodDelete, "/api/saved-rankings/1/default", nil))
+	if clearDefaultRecorder.Code != http.StatusOK {
+		t.Fatalf("expected 200 when clearing default, got %d: %s", clearDefaultRecorder.Code, clearDefaultRecorder.Body.String())
+	}
+	if !strings.Contains(clearDefaultRecorder.Body.String(), `"isDefault": false`) {
+		t.Fatalf("expected clear default payload to unset default: %s", clearDefaultRecorder.Body.String())
+	}
+
+	deleteRecorder := httptest.NewRecorder()
+	server.handleSavedRankingByID(deleteRecorder, httptest.NewRequest(http.MethodDelete, "/api/saved-rankings/1", nil))
+	if deleteRecorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", deleteRecorder.Code, deleteRecorder.Body.String())
+	}
+
+	missingRecorder := httptest.NewRecorder()
+	server.handleSavedRankingByID(missingRecorder, httptest.NewRequest(http.MethodGet, "/api/saved-rankings/1", nil))
+	if missingRecorder.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 after delete, got %d: %s", missingRecorder.Code, missingRecorder.Body.String())
+	}
+}
+
+func TestSavedRankingsAPIValidatesRequest(t *testing.T) {
+	server := &app{dbPath: filepath.Join(t.TempDir(), "saved-rankings-validation.sqlite")}
+
+	blankNameRequest := httptest.NewRequest(http.MethodPost, "/api/saved-rankings", strings.NewReader(`{
+  "name":"   ",
+  "system":"elo",
+  "startDate":"2026-01-01",
+  "endDate":"2026-01-31",
+  "minTournaments":1
+}`))
+	blankNameRequest.Header.Set("Content-Type", "application/json")
+	blankNameRecorder := httptest.NewRecorder()
+	server.handleSavedRankings(blankNameRecorder, blankNameRequest)
+	if blankNameRecorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for blank name, got %d: %s", blankNameRecorder.Code, blankNameRecorder.Body.String())
+	}
+
+	invalidFilterRequest := httptest.NewRequest(http.MethodPost, "/api/saved-rankings", strings.NewReader(`{
+  "name":"Bad Date",
+  "system":"elo",
+  "startDate":"not-a-date",
+  "endDate":"2026-01-31",
+  "minTournaments":1
+}`))
+	invalidFilterRequest.Header.Set("Content-Type", "application/json")
+	invalidFilterRecorder := httptest.NewRecorder()
+	server.handleSavedRankings(invalidFilterRecorder, invalidFilterRequest)
+	if invalidFilterRecorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid filters, got %d: %s", invalidFilterRecorder.Code, invalidFilterRecorder.Body.String())
+	}
+
+	missingRecorder := httptest.NewRecorder()
+	server.handleSavedRankingByID(missingRecorder, httptest.NewRequest(http.MethodGet, "/api/saved-rankings/999", nil))
+	if missingRecorder.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for missing saved ranking, got %d: %s", missingRecorder.Code, missingRecorder.Body.String())
+	}
+
+	missingDefaultRecorder := httptest.NewRecorder()
+	server.handleSavedRankingByID(missingDefaultRecorder, httptest.NewRequest(http.MethodPost, "/api/saved-rankings/999/default", nil))
+	if missingDefaultRecorder.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for missing default target, got %d: %s", missingDefaultRecorder.Code, missingDefaultRecorder.Body.String())
+	}
+}
+
 func TestRegionAPIHandlers(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "regions.sqlite")
 	setupSQLiteFixture(t, dbPath, `
@@ -536,6 +727,14 @@ func TestSyncActionHandlers(t *testing.T) {
 	server := &app{
 		syncRunnerFactory: func() (syncRunner, error) {
 			return syncRunnerStub{
+				discoverFunc: func() (int, error) {
+					calls = append(calls, call{method: "discover"})
+					return 7, nil
+				},
+				runFunc: func() error {
+					calls = append(calls, call{method: "run"})
+					return nil
+				},
 				syncEventFunc: func(idOrURL string, force bool) error {
 					calls = append(calls, call{method: "import", target: idOrURL, force: force})
 					return nil
@@ -576,8 +775,26 @@ func TestSyncActionHandlers(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", importRecorder.Code, importRecorder.Body.String())
 	}
 
-	if len(calls) != 3 {
-		t.Fatalf("expected 3 sync action calls, got %#v", calls)
+	discoverRecorder := httptest.NewRecorder()
+	server.handleSyncDiscover(discoverRecorder, httptest.NewRequest(http.MethodPost, "/api/sync/discover", nil))
+	if discoverRecorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", discoverRecorder.Code, discoverRecorder.Body.String())
+	}
+
+	runRecorder := httptest.NewRecorder()
+	server.handleSyncRun(runRecorder, httptest.NewRequest(http.MethodPost, "/api/sync/run", nil))
+	if runRecorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", runRecorder.Code, runRecorder.Body.String())
+	}
+
+	discoverRunRecorder := httptest.NewRecorder()
+	server.handleSyncDiscoverRun(discoverRunRecorder, httptest.NewRequest(http.MethodPost, "/api/sync/discover-run", nil))
+	if discoverRunRecorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", discoverRunRecorder.Code, discoverRunRecorder.Body.String())
+	}
+
+	if len(calls) != 7 {
+		t.Fatalf("expected 7 sync action calls, got %#v", calls)
 	}
 	if calls[0] != (call{method: "requeue", target: "BBB"}) {
 		t.Fatalf("unexpected requeue call: %#v", calls[0])
@@ -587,6 +804,15 @@ func TestSyncActionHandlers(t *testing.T) {
 	}
 	if calls[2] != (call{method: "import", target: "https://braacket.com/tournament/DDD", force: true}) {
 		t.Fatalf("unexpected import call: %#v", calls[2])
+	}
+	if calls[3] != (call{method: "discover"}) {
+		t.Fatalf("unexpected discover call: %#v", calls[3])
+	}
+	if calls[4] != (call{method: "run"}) {
+		t.Fatalf("unexpected run call: %#v", calls[4])
+	}
+	if calls[5] != (call{method: "discover"}) || calls[6] != (call{method: "run"}) {
+		t.Fatalf("unexpected discover-run calls: %#v", calls[5:])
 	}
 }
 
@@ -609,6 +835,18 @@ func TestSyncActionHandlersValidateRequest(t *testing.T) {
 	server.handleSyncRequeue(missingTargetRecorder, request)
 	if missingTargetRecorder.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d: %s", missingTargetRecorder.Code, missingTargetRecorder.Body.String())
+	}
+
+	discoverGetRecorder := httptest.NewRecorder()
+	server.handleSyncDiscover(discoverGetRecorder, httptest.NewRequest(http.MethodGet, "/api/sync/discover", nil))
+	if discoverGetRecorder.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405, got %d: %s", discoverGetRecorder.Code, discoverGetRecorder.Body.String())
+	}
+
+	runGetRecorder := httptest.NewRecorder()
+	server.handleSyncRun(runGetRecorder, httptest.NewRequest(http.MethodGet, "/api/sync/run", nil))
+	if runGetRecorder.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405, got %d: %s", runGetRecorder.Code, runGetRecorder.Body.String())
 	}
 }
 
@@ -785,9 +1023,25 @@ func TestPaginatePlayersCompactsByDefault(t *testing.T) {
 }
 
 type syncRunnerStub struct {
+	discoverFunc     func() (int, error)
+	runFunc          func() error
 	syncEventFunc    func(idOrURL string, force bool) error
 	resetEventFunc   func(idOrURL string) error
 	requeueEventFunc func(idOrURL string) error
+}
+
+func (s syncRunnerStub) Discover() (int, error) {
+	if s.discoverFunc == nil {
+		return 0, fmt.Errorf("unexpected Discover call")
+	}
+	return s.discoverFunc()
+}
+
+func (s syncRunnerStub) Run() error {
+	if s.runFunc == nil {
+		return fmt.Errorf("unexpected Run call")
+	}
+	return s.runFunc()
 }
 
 func (s syncRunnerStub) SyncEvent(idOrURL string, force bool) error {
@@ -921,7 +1175,7 @@ func TestStaticHandlerServesIndex(t *testing.T) {
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", recorder.Code)
 	}
-	if !strings.Contains(recorder.Body.String(), "Tornee") {
+	if !strings.Contains(recorder.Body.String(), "Tourknee") {
 		t.Fatalf("expected app shell html, got: %s", recorder.Body.String())
 	}
 }
