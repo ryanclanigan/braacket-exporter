@@ -365,6 +365,11 @@ button {
   align-items: center;
 }
 
+.detail-card-header > div {
+  display: grid;
+  gap: 3px;
+}
+
 .identity-player-row {
   display: flex;
   justify-content: space-between;
@@ -461,7 +466,17 @@ th {
 }
 
 .ranking-actions-cell {
-  width: 108px;
+  width: 132px;
+}
+
+.ranking-row-actions {
+  display: grid;
+  gap: 6px;
+}
+
+.ranking-events-toggle.is-active {
+  background: rgba(14, 107, 92, 0.16);
+  color: var(--accent-strong);
 }
 
 .ranking-detail-row td {
@@ -554,6 +569,48 @@ th {
   font-size: 0.82rem;
   white-space: nowrap;
   margin-left: 2px;
+}
+
+.ranking-events-panel {
+  margin-top: 8px;
+}
+
+.player-event-card {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.player-event-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: start;
+}
+
+.player-event-brackets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.player-event-bracket {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel-strong);
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.player-event-bracket:hover {
+  border-color: rgba(14, 107, 92, 0.28);
+  color: var(--accent-strong);
 }
 
 .player-list {

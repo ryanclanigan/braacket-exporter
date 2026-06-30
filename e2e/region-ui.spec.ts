@@ -131,7 +131,16 @@ INSERT INTO tournaments (
    0, NULL, NULL, NULL, NULL),
   (2, 'T-RETRY', 'https://braacket.com/tournament/T-RETRY', 'comelee', 'Arcadian Pools', 'June 11', '2026-06-11', 'failed_retryable',
    '2026-06-11T00:00:00Z', '2026-06-20T00:11:00Z', '2026-06-20T00:11:00Z', NULL, 2,
-   2, 'rate_limit', 'HTTP 429', '2026-06-20T06:00:00Z', NULL);
+   2, 'rate_limit', 'HTTP 429', '2026-06-20T06:00:00Z', NULL),
+  (3, 'FRW3-SINGLES', 'https://braacket.com/tournament/FRW3-SINGLES', 'comelee', 'Front Range Weekly #3 - Melee Singles', 'June 17', '2026-06-17', 'imported',
+   '2026-06-17T00:00:00Z', '2026-06-20T00:12:00Z', '2026-06-20T00:12:00Z', '2026-06-20T00:13:00Z', 1,
+   0, NULL, NULL, NULL, NULL),
+  (4, 'FRW3-DOUBLES', 'https://braacket.com/tournament/FRW3-DOUBLES', 'comelee', 'Front Range Weekly #3 - Melee Doubles', 'June 17', '2026-06-17', 'imported',
+   '2026-06-17T00:00:00Z', '2026-06-20T00:12:00Z', '2026-06-20T00:12:00Z', '2026-06-20T00:13:00Z', 1,
+   0, NULL, NULL, NULL, NULL),
+  (5, 'FRW4-FINAL', 'https://braacket.com/tournament/FRW4-FINAL', 'comelee', 'Front Range Weekly #4 Final', 'June 24', '2026-06-24', 'imported',
+   '2026-06-24T00:00:00Z', '2026-06-24T00:12:00Z', '2026-06-24T00:12:00Z', '2026-06-24T00:13:00Z', 1,
+   0, NULL, NULL, NULL, NULL);
 INSERT INTO tournament_import_attempts (
   id, tournament_id, run_id, status, started_at, finished_at, error_class, error_message,
   retry_count, request_count, pages_fetched, http_statuses, duration_ms, retryable
@@ -152,6 +161,9 @@ INSERT INTO tournament_players (id, tournament_id, attempt_id, canonical_player_
 VALUES
   (11, 1, 1, 363, 'lp-dial', 'Dial M'),
   (12, 1, 1, 2, 'lp-bob', 'Bob'),
+  (31, 3, 1, 363, 'lp-dial', 'Dial M'),
+  (41, 4, 1, 363, 'lp-dial', 'Dial M'),
+  (51, 5, 1, 363, 'lp-dial', 'Dial M'),
   (21, 1, 1, 1001, 'l1', 'Soda cup'),
   (22, 1, 1, 1002, 'l2', 'Soda cup'),
   (23, 1, 1, 1003, 'l3', 'Dial N'),
@@ -389,6 +401,27 @@ test("rankings UI shows expandable head-to-head details", async ({ page }) => {
 
   await detailRow.locator('[data-ranking-sort="record"]').click();
   await expect(detailRow).toContainText("Record");
+});
+
+test("rankings UI shows grouped entered events for a player", async ({ page }) => {
+  await page.goto(serverURL, { waitUntil: "domcontentloaded" });
+  await page.locator('a[href="#rankings"]').click();
+  await page.locator('#ranking-form input[name="minTournaments"]').fill("1");
+  await page.locator('#ranking-form button[type="submit"]').click();
+
+  await expect(page.locator("#ranking-rows")).toContainText("Dial M");
+
+  const dialRow = page.locator("#ranking-rows tr.ranking-row", { hasText: "Dial M" }).first();
+  await dialRow.locator(".ranking-events-toggle").click();
+
+  await expect(page.locator("#player-events-panel")).toBeVisible();
+  await expect(page.locator("#player-events-title")).toContainText("Dial M Entered Events");
+  await expect(page.locator("#player-events-meta")).toContainText("3 grouped events");
+  await expect(page.locator("#player-events-list")).toContainText("Front Range Weekly #3");
+  await expect(page.locator("#player-events-list")).toContainText("2 brackets");
+  await expect(page.locator("#player-events-list")).toContainText("Front Range Weekly #3 - Melee Singles");
+  await expect(page.locator("#player-events-list")).toContainText("Front Range Weekly #3 - Melee Doubles");
+  await expect(page.locator("#player-events-list")).toContainText("Front Range Weekly #4");
 });
 
 test("rankings UI saves, opens, refreshes, and deletes shared snapshots", async ({ page }) => {

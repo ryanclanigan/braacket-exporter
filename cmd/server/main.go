@@ -93,6 +93,31 @@ type rankingResponse struct {
 	Players            interface{} `json:"players"`
 }
 
+type playerEventBracketResponse struct {
+	TournamentID int    `json:"tournamentId"`
+	BraacketID   string `json:"braacketId,omitempty"`
+	Name         string `json:"name"`
+	URL          string `json:"url,omitempty"`
+}
+
+type playerEventGroupResponse struct {
+	EventDate    string                       `json:"eventDate"`
+	EventName    string                       `json:"eventName"`
+	BracketCount int                          `json:"bracketCount"`
+	Brackets     []playerEventBracketResponse `json:"brackets"`
+}
+
+type playerEventsResponse struct {
+	PlayerID            int                        `json:"playerId"`
+	PlayerName          string                     `json:"playerName"`
+	StartDate           string                     `json:"startDate"`
+	EndDate             string                     `json:"endDate"`
+	TournamentNameLike  string                     `json:"tournamentNameLike,omitempty"`
+	TotalEvents         int                        `json:"totalEvents"`
+	TotalBracketEntries int                        `json:"totalBracketEntries"`
+	Events              []playerEventGroupResponse `json:"events"`
+}
+
 type rankingQuery struct {
 	System             string
 	StartDate          string
@@ -234,6 +259,7 @@ func main() {
 	mux.HandleFunc("/api/regions/assign", server.handleAssignRegion)
 	mux.HandleFunc("/api/regions/unassign", server.handleUnassignRegion)
 	mux.HandleFunc("/api/regions/delete", server.handleDeleteRegion)
+	mux.HandleFunc("/api/player-events", server.handlePlayerEvents)
 	mux.HandleFunc("/api/rankings", server.handleRankings)
 	mux.HandleFunc("/api/saved-rankings", server.handleSavedRankings)
 	mux.HandleFunc("/api/saved-rankings/", server.handleSavedRankingByID)
@@ -580,6 +606,48 @@ func (a *app) handleRankings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, a.buildRankingResponse(query, fullPlayers, generatedAt, "live", 0, "", ""))
+}
+
+func (a *app) handlePlayerEvents(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, fmt.Errorf("method not allowed"))
+		return
+	}
+
+	playerID := atoiSafe(r.URL.Query().Get("playerId"))
+	if playerID < 1 {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("playerId must be a positive integer"))
+		return
+	}
+
+	startDate := defaultDate(r.URL.Query().Get("startDate"), time.Now().AddDate(0, -6, 0))
+	endDate := defaultDate(r.URL.Query().Get("endDate"), time.Now())
+	if !isDateValue(startDate) || !isDateValue(endDate) {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("startDate and endDate must be in YYYY-MM-DD format"))
+		return
+	}
+	if startDate > endDate {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("startDate must be on or before endDate"))
+		return
+	}
+
+	db, err := openAppDB(a.dbPath)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	defer db.Close()
+
+	response, err := loadPlayerEvents(db, playerID, startDate, endDate, strings.TrimSpace(r.URL.Query().Get("tournamentNameLike")))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusNotFound, fmt.Errorf("player not found"))
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (a *app) handleSavedRankings(w http.ResponseWriter, r *http.Request) {
@@ -1271,6 +1339,92 @@ func (a *app) computeSavedRankingSnapshot(query rankingQuery) (savedrankings.Sna
 	}, nil
 }
 
+func loadPlayerEvents(db *sql.DB, playerID int, startDate string, endDate string, tournamentNameLike string) (playerEventsResponse, error) {
+	var playerName string
+	if err := db.QueryRow(`SELECT name FROM players WHERE id = ?`, playerID).Scan(&playerName); err != nil {
+		return playerEventsResponse{}, err
+	}
+
+	namePattern := buildTournamentNamePattern(tournamentNameLike)
+	rows, err := db.Query(`
+SELECT
+  t.id,
+  t.braacket_id,
+  t.url,
+  t.name,
+  t.tournament_date
+FROM tournament_players tp
+JOIN tournaments t ON t.id = tp.tournament_id
+WHERE tp.canonical_player_id = ?
+  AND t.queue_state = 'imported'
+  AND t.tournament_date IS NOT NULL
+  AND t.tournament_date >= ?
+  AND t.tournament_date <= ?
+  AND (? IS NULL OR t.name LIKE ?)
+ORDER BY t.tournament_date DESC, t.id DESC`, playerID, startDate, endDate, namePattern, namePattern)
+	if err != nil {
+		return playerEventsResponse{}, err
+	}
+	defer rows.Close()
+
+	type bracketRow struct {
+		tournamentID   int
+		braacketID     sql.NullString
+		url            sql.NullString
+		name           string
+		tournamentDate string
+	}
+
+	events := []playerEventGroupResponse{}
+	indexByKey := map[string]int{}
+	totalBracketEntries := 0
+	for rows.Next() {
+		var row bracketRow
+		if err := rows.Scan(&row.tournamentID, &row.braacketID, &row.url, &row.name, &row.tournamentDate); err != nil {
+			return playerEventsResponse{}, err
+		}
+		totalBracketEntries += 1
+
+		eventKey := buildTournamentEventKey(row.tournamentDate, row.name)
+		eventIndex, ok := indexByKey[eventKey]
+		if !ok {
+			events = append(events, playerEventGroupResponse{
+				EventDate: row.tournamentDate,
+				EventName: displayTournamentEventName(row.name),
+				Brackets:  []playerEventBracketResponse{},
+			})
+			eventIndex = len(events) - 1
+			indexByKey[eventKey] = eventIndex
+		}
+
+		displayName := displayTournamentEventName(row.name)
+		if events[eventIndex].EventName == "" || len(displayName) < len(events[eventIndex].EventName) {
+			events[eventIndex].EventName = displayName
+		}
+		events[eventIndex].Brackets = append(events[eventIndex].Brackets, playerEventBracketResponse{
+			TournamentID: row.tournamentID,
+			BraacketID:   row.braacketID.String,
+			Name:         row.name,
+			URL:          row.url.String,
+		})
+		events[eventIndex].BracketCount = len(events[eventIndex].Brackets)
+	}
+	if err := rows.Err(); err != nil {
+		return playerEventsResponse{}, err
+	}
+
+	return playerEventsResponse{
+		PlayerID:            playerID,
+		PlayerName:          playerName,
+		StartDate:           startDate,
+		EndDate:             endDate,
+		TournamentNameLike:  tournamentNameLike,
+		TotalEvents:         len(events),
+		TotalBracketEntries: totalBracketEntries,
+		Events:              events,
+	}, nil
+}
+
 func (a *app) buildRankingResponse(query rankingQuery, fullPlayers []map[string]interface{}, generatedAt time.Time, source string, savedRankingID int, savedRankingName string, savedAt string) rankingResponse {
 	page := paginatePlayers(fullPlayers, query.Offset, query.Limit, query.IncludeRecords)
 	return rankingResponse{
@@ -1291,6 +1445,35 @@ func (a *app) buildRankingResponse(query rankingQuery, fullPlayers []map[string]
 		SavedRankingName:   savedRankingName,
 		SavedAt:            savedAt,
 		Players:            page,
+	}
+}
+
+func buildTournamentEventKey(tournamentDate string, tournamentName string) string {
+	return tournamentDate + "::" + normalizeTournamentEventStem(tournamentName)
+}
+
+func displayTournamentEventName(tournamentName string) string {
+	stem := tournamentName
+	if split := strings.SplitN(tournamentName, " - ", 2); len(split) > 0 {
+		stem = split[0]
+	}
+	return trimTournamentEventSuffix(strings.TrimSpace(stem))
+}
+
+func normalizeTournamentEventStem(tournamentName string) string {
+	return strings.ToLower(displayTournamentEventName(tournamentName))
+}
+
+func trimTournamentEventSuffix(value string) string {
+	trimmed := strings.TrimSpace(value)
+	lower := strings.ToLower(trimmed)
+	switch {
+	case strings.HasSuffix(lower, " final"):
+		return strings.TrimSpace(trimmed[:len(trimmed)-len(" final")])
+	case strings.HasSuffix(lower, " regen"):
+		return strings.TrimSpace(trimmed[:len(trimmed)-len(" regen")])
+	default:
+		return trimmed
 	}
 }
 
@@ -1550,6 +1733,17 @@ func parseBoolFlag(value string) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func buildTournamentNamePattern(tournamentNameLike string) sql.NullString {
+	trimmed := strings.TrimSpace(tournamentNameLike)
+	if trimmed == "" {
+		return sql.NullString{}
+	}
+	return sql.NullString{
+		String: "%" + trimmed + "%",
+		Valid:  true,
 	}
 }
 

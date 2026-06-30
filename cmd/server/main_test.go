@@ -165,6 +165,9 @@ VALUES
 	if !strings.Contains(recorder.Body.String(), `"status": "ready"`) {
 		t.Fatalf("expected ready elo response: %s", recorder.Body.String())
 	}
+	if !strings.Contains(recorder.Body.String(), `"canonicalPlayerId": 1`) {
+		t.Fatalf("expected ranking response to include canonical player ids: %s", recorder.Body.String())
+	}
 }
 
 func TestHandleRankingsTrueSkillSystem(t *testing.T) {
@@ -239,6 +242,75 @@ VALUES
 	}
 	if !strings.Contains(recorder.Body.String(), `"trueskill_mu"`) {
 		t.Fatalf("expected trueskill details in response: %s", recorder.Body.String())
+	}
+}
+
+func TestHandlePlayerEventsGroupsSameDayBrackets(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "player-events.sqlite")
+	setupSQLiteFixture(t, dbPath, `
+CREATE TABLE tournaments (
+  id INTEGER PRIMARY KEY,
+  braacket_id TEXT,
+  url TEXT,
+  league_slug TEXT,
+  name TEXT,
+  tournament_date TEXT,
+  queue_state TEXT
+);
+CREATE TABLE players (
+  id INTEGER PRIMARY KEY,
+  canonical_name TEXT,
+  name TEXT,
+  first_seen_at TEXT,
+  last_seen_at TEXT
+);
+CREATE TABLE tournament_players (
+  id INTEGER PRIMARY KEY,
+  tournament_id INTEGER,
+  canonical_player_id INTEGER,
+  name TEXT
+);
+INSERT INTO tournaments (id, braacket_id, url, league_slug, name, tournament_date, queue_state)
+VALUES
+  (1, 'weekly-1-singles', 'https://braacket.com/tournament/weekly-1-singles', 'comelee', 'Weekly Wednesday #1 - Melee Singles', '2026-01-10', 'imported'),
+  (2, 'weekly-1-doubles', 'https://braacket.com/tournament/weekly-1-doubles', 'comelee', 'Weekly Wednesday #1 - Melee Doubles', '2026-01-10', 'imported'),
+  (3, 'weekly-2-final', 'https://braacket.com/tournament/weekly-2-final', 'comelee', 'Weekly Wednesday #2 Final', '2026-01-24', 'imported');
+INSERT INTO players (id, canonical_name, name, first_seen_at, last_seen_at)
+VALUES
+  (1, 'name:alice', 'Alice', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+INSERT INTO tournament_players (id, tournament_id, canonical_player_id, name)
+VALUES
+  (11, 1, 1, 'Alice'),
+  (21, 2, 1, 'Alice'),
+  (31, 3, 1, 'ALICE!');
+`)
+
+	server := &app{dbPath: dbPath}
+	request := httptest.NewRequest(http.MethodGet, "/api/player-events?playerId=1&startDate=2026-01-01&endDate=2026-01-31", nil)
+	recorder := httptest.NewRecorder()
+	server.handlePlayerEvents(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+
+	body := recorder.Body.String()
+	if !strings.Contains(body, `"playerName": "Alice"`) {
+		t.Fatalf("expected player name in response: %s", body)
+	}
+	if !strings.Contains(body, `"totalEvents": 2`) {
+		t.Fatalf("expected grouped event count in response: %s", body)
+	}
+	if !strings.Contains(body, `"eventName": "Weekly Wednesday #1"`) {
+		t.Fatalf("expected same-day weekly event to group by stem: %s", body)
+	}
+	if !strings.Contains(body, `"bracketCount": 2`) {
+		t.Fatalf("expected grouped weekly event to include both brackets: %s", body)
+	}
+	if !strings.Contains(body, `"Weekly Wednesday #1 - Melee Singles"`) || !strings.Contains(body, `"Weekly Wednesday #1 - Melee Doubles"`) {
+		t.Fatalf("expected grouped event to retain bracket names: %s", body)
+	}
+	if !strings.Contains(body, `"eventName": "Weekly Wednesday #2"`) {
+		t.Fatalf("expected final suffix to collapse into event name stem: %s", body)
 	}
 }
 

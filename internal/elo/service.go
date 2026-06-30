@@ -219,6 +219,7 @@ func ComputeExport(dbPath string, startDate string, endDate string, minimumTourn
 		}
 
 		players = append(players, map[string]interface{}{
+			"canonicalPlayerId":        player.playerID,
 			"name":                     player.name,
 			"rank":                     index + 1,
 			"score":                    player.rating,

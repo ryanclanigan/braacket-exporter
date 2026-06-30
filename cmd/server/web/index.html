@@ -121,6 +121,15 @@
               <div id="ranking-page-meta" class="muted"></div>
               <button id="next-page" class="button-secondary" type="button">Next</button>
             </div>
+            <section id="player-events-panel" class="ranking-events-panel detail-card" hidden>
+              <div class="detail-card-header">
+                <div>
+                  <strong id="player-events-title">Entered Events</strong>
+                  <span id="player-events-meta" class="muted">Use a ranking row to load grouped tournament entries.</span>
+                </div>
+              </div>
+              <div id="player-events-list" class="detail-list"></div>
+            </section>
           </div>
         </section>
 
@@ -388,6 +397,10 @@
       const previousPageButton = document.querySelector("#previous-page");
       const nextPageButton = document.querySelector("#next-page");
       const rankingPageMeta = document.querySelector("#ranking-page-meta");
+      const playerEventsPanel = document.querySelector("#player-events-panel");
+      const playerEventsTitle = document.querySelector("#player-events-title");
+      const playerEventsMeta = document.querySelector("#player-events-meta");
+      const playerEventsList = document.querySelector("#player-events-list");
       const rankingDetailState = new Map();
       const rankingRecordsByPlayer = new Map();
       const apiRoot = new URL("api/", window.location.href);
@@ -407,6 +420,12 @@
         selectedSourcePageId: 0,
         pollTimer: 0,
         actionCount: 0,
+      };
+
+      const playerEventsState = {
+        playerId: 0,
+        playerName: "",
+        filterSignature: "",
       };
 
       function defaultDate(offsetDays) {
@@ -696,7 +715,12 @@
           rankingRows.innerHTML = "";
           rankingPageMeta.textContent = "";
           rankingRecordsByPlayer.clear();
+          resetPlayerEventsPanel();
           return;
+        }
+
+        if (playerEventsState.playerId && playerEventsState.filterSignature !== currentRankingFilterSignature()) {
+          resetPlayerEventsPanel();
         }
 
         const players = Array.isArray(data.players) ? data.players : [];
@@ -741,6 +765,7 @@
                   .join(", ")
               : "";
             const playerKey = String(player.name || player.rank || "");
+            const canonicalPlayerId = Number(player.canonicalPlayerId || 0);
             rankingRecordsByPlayer.set(playerKey, Array.isArray(player.records) ? player.records : []);
             const detailState = rankingDetailState.get(playerKey) || { open: false, sort: "rank", desc: false };
             const detailHTML = renderH2HDetail(player.records, detailState);
@@ -753,14 +778,25 @@
                 <td>${strength}</td>
                 <td class="muted">${opponents || "No wins on ranked opponents shown"}</td>
                 <td class="ranking-actions-cell">
-                  <button
-                    class="button-secondary ranking-detail-toggle"
-                    type="button"
-                    data-ranking-player="${escapeHTML(playerKey)}"
-                    aria-expanded="${detailState.open ? "true" : "false"}"
-                  >
-                    ${detailState.open ? "Hide H2H" : "Show H2H"}
-                  </button>
+                  <div class="ranking-row-actions">
+                    <button
+                      class="button-secondary ranking-detail-toggle"
+                      type="button"
+                      data-ranking-player="${escapeHTML(playerKey)}"
+                      aria-expanded="${detailState.open ? "true" : "false"}"
+                    >
+                      ${detailState.open ? "Hide H2H" : "Show H2H"}
+                    </button>
+                    <button
+                      class="button-secondary ranking-events-toggle ${canonicalPlayerId && canonicalPlayerId === playerEventsState.playerId ? "is-active" : ""}"
+                      type="button"
+                      data-ranking-events-player-id="${canonicalPlayerId}"
+                      data-ranking-events-player-name="${escapeHTML(player.name || "")}"
+                      ${canonicalPlayerId ? "" : "disabled"}
+                    >
+                      View Events
+                    </button>
+                  </div>
                 </td>
               </tr>
               <tr class="ranking-detail-row ${detailState.open ? "is-open" : ""}" ${detailState.open ? "" : "hidden"}>
@@ -1236,6 +1272,85 @@
         return data;
       }
 
+      function currentRankingFilterSignature() {
+        const payload = rankingPayloadFromForm();
+        return JSON.stringify({
+          source: rankingState.source,
+          savedRankingId: rankingState.savedRankingId,
+          system: payload.system,
+          startDate: payload.startDate,
+          endDate: payload.endDate,
+          tournamentNameLike: payload.tournamentNameLike,
+        });
+      }
+
+      function resetPlayerEventsPanel() {
+        playerEventsState.playerId = 0;
+        playerEventsState.playerName = "";
+        playerEventsState.filterSignature = "";
+        playerEventsTitle.textContent = "Entered Events";
+        playerEventsMeta.textContent = "Use a ranking row to load grouped tournament entries.";
+        playerEventsList.innerHTML = "";
+        rankingRows.querySelectorAll(".ranking-events-toggle").forEach((button) => button.classList.remove("is-active"));
+        playerEventsPanel.hidden = true;
+      }
+
+      function renderPlayerEvents(data) {
+        const events = Array.isArray(data.events) ? data.events : [];
+        playerEventsTitle.textContent = `${data.playerName || "Player"} Entered Events`;
+        playerEventsMeta.textContent = `${data.totalEvents || 0} grouped event${Number(data.totalEvents) === 1 ? "" : "s"} from ${data.startDate} to ${data.endDate}${data.totalBracketEntries ? ` • ${data.totalBracketEntries} bracket entr${Number(data.totalBracketEntries) === 1 ? "y" : "ies"}` : ""}`;
+        playerEventsList.innerHTML = events.length
+          ? events
+              .map(
+                (event) => `
+                  <article class="player-event-card">
+                    <div class="player-event-header">
+                      <div>
+                        <strong>${escapeHTML(event.eventName)}</strong>
+                        <div class="muted">${escapeHTML(event.eventDate)} • ${event.bracketCount} bracket${event.bracketCount === 1 ? "" : "s"}</div>
+                      </div>
+                    </div>
+                    <div class="player-event-brackets">
+                      ${(Array.isArray(event.brackets) ? event.brackets : [])
+                        .map((bracket) => bracket.url
+                          ? `<a class="player-event-bracket" href="${escapeHTML(bracket.url)}" target="_blank" rel="noreferrer">${escapeHTML(bracket.name)}</a>`
+                          : `<span class="player-event-bracket">${escapeHTML(bracket.name)}</span>`)
+                        .join("")}
+                    </div>
+                  </article>
+                `
+              )
+              .join("")
+          : `<div class="muted">No imported tournament entries matched this ranking filter.</div>`;
+        playerEventsPanel.hidden = false;
+      }
+
+      async function loadPlayerEvents(playerId, playerName) {
+        playerEventsState.playerId = Number(playerId || 0);
+        playerEventsState.playerName = String(playerName || "");
+        playerEventsState.filterSignature = currentRankingFilterSignature();
+        playerEventsTitle.textContent = `${playerEventsState.playerName || "Player"} Entered Events`;
+        playerEventsMeta.textContent = "Loading grouped tournament entries...";
+        playerEventsList.innerHTML = "";
+        playerEventsPanel.hidden = false;
+
+        const params = new URLSearchParams();
+        params.set("playerId", String(playerEventsState.playerId));
+        params.set("startDate", String(rankingForm.elements.startDate.value || ""));
+        params.set("endDate", String(rankingForm.elements.endDate.value || ""));
+        const tournamentNameLike = String(rankingForm.elements.tournamentNameLike.value || "");
+        if (tournamentNameLike) {
+          params.set("tournamentNameLike", tournamentNameLike);
+        }
+
+        const response = await fetch(apiPath(`player-events?${params.toString()}`));
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error || "Failed to load player events");
+        }
+        renderPlayerEvents(data);
+      }
+
       async function loadPlayers() {
         playerResults.innerHTML = `<div class="muted">Loading players...</div>`;
         const params = new URLSearchParams(new FormData(playerForm));
@@ -1683,6 +1798,25 @@
       });
 
       rankingRows.addEventListener("click", (event) => {
+        const eventsButton = event.target.closest(".ranking-events-toggle");
+        if (eventsButton) {
+          const playerId = Number(eventsButton.dataset.rankingEventsPlayerId || 0);
+          const playerName = eventsButton.dataset.rankingEventsPlayerName || "";
+          if (!playerId) {
+            return;
+          }
+          rankingRows.querySelectorAll(".ranking-events-toggle").forEach((button) => {
+            button.classList.toggle("is-active", button === eventsButton);
+          });
+          void loadPlayerEvents(playerId, playerName).catch((error) => {
+            playerEventsTitle.textContent = `${playerName || "Player"} Entered Events`;
+            playerEventsMeta.textContent = error instanceof Error ? error.message : String(error);
+            playerEventsList.innerHTML = "";
+            playerEventsPanel.hidden = false;
+          });
+          return;
+        }
+
         const detailButton = event.target.closest(".ranking-detail-toggle");
         if (detailButton) {
           const playerKey = detailButton.dataset.rankingPlayer;
