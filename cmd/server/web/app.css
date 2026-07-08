@@ -48,6 +48,25 @@ body {
   letter-spacing: -0.02em;
 }
 
+.brand-lockup {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 10px;
+}
+
+.brand-lockup h1 {
+  margin: 0;
+}
+
+.brand-mark {
+  width: 64px;
+  height: 64px;
+  flex: 0 0 auto;
+  border-radius: 18px;
+  box-shadow: 0 14px 24px rgba(0, 0, 0, 0.24);
+}
+
 .eyebrow {
   margin: 0 0 8px;
   text-transform: uppercase;
@@ -718,6 +737,11 @@ th {
     padding-bottom: 20px;
   }
 
+  .brand-mark {
+    width: 56px;
+    height: 56px;
+  }
+
   .stats-grid,
   .filters {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -739,6 +763,16 @@ th {
 @media (max-width: 720px) {
   .content {
     padding: 16px;
+  }
+
+  .brand-lockup {
+    gap: 12px;
+  }
+
+  .brand-mark {
+    width: 48px;
+    height: 48px;
+    border-radius: 14px;
   }
 
   .panel {

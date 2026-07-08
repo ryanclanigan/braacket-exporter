@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">Tourknee logo</title>
+  <desc id="desc">A cropped knee sketch on a shaded warm badge.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f7edd6"/>
+      <stop offset="55%" stop-color="#e9d3a1"/>
+      <stop offset="100%" stop-color="#cab47b"/>
+    </linearGradient>
+    <radialGradient id="shade" cx="40%" cy="35%" r="70%">
+      <stop offset="0%" stop-color="#fff8e9" stop-opacity=".72"/>
+      <stop offset="65%" stop-color="#235246" stop-opacity=".08"/>
+      <stop offset="100%" stop-color="#17352f" stop-opacity=".34"/>
+    </radialGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="5" dy="8" stdDeviation="7" flood-color="#17352f" flood-opacity=".28"/>
+    </filter>
+  </defs>
+  <rect x="12" y="12" width="232" height="232" rx="52" fill="url(#bg)"/>
+  <rect x="12" y="12" width="232" height="232" rx="52" fill="url(#shade)"/>
+  <rect x="19" y="19" width="218" height="218" rx="45" fill="none" stroke="#fff7e8" stroke-opacity=".5" stroke-width="3"/>
+  <g filter="url(#shadow)" fill="none" stroke="#171411" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M72 58c-11 21-21 40-26 54 7 17 22 31 46 48 23 38 43 77 60 118" stroke-width="5"/>
+    <path d="M77 56c-7 18-14 34-20 50" stroke-width="1.9" opacity=".7"/>
+    <path d="M98 121c5-16 10-31 15-44" stroke-width="4.3"/>
+    <path d="M103 114c7-10 13-18 20-26" stroke-width="1.8" opacity=".72"/>
+    <path d="M108 103l12-11M109 108l12-9M110 114l11-7M111 120l10-6M112 126l8-5" stroke-width="1.6" opacity=".72"/>
+    <path d="M182 57c-7 24-15 45-24 62-12 25-27 45-46 58" stroke-width="5"/>
+    <path d="M177 60c-4 15-10 28-17 42" stroke-width="1.8" opacity=".72"/>
+    <path d="M160 104c-5 12-11 22-17 31" stroke-width="1.8" opacity=".72"/>
+    <path d="M145 180c18 11 29 32 33 64" stroke-width="4.4"/>
+    <path d="M131 169c14 10 24 19 33 28" stroke-width="3"/>
+  </g>
+</svg>
