@@ -1,5 +1,10 @@
 package synccore
 
+import (
+	"database/sql"
+	"fmt"
+)
+
 func ApplySchema(repo *Repository) error {
 	_, err := repo.db.Exec(`
 CREATE TABLE IF NOT EXISTS sync_runs (
@@ -142,6 +147,54 @@ CREATE UNIQUE INDEX IF NOT EXISTS players_braacket_league_player_id_unique
 
 CREATE UNIQUE INDEX IF NOT EXISTS player_identity_aliases_type_value_unique
   ON player_identity_aliases(alias_type, alias_value);
+
 `)
+	if err != nil {
+		return err
+	}
+	for _, index := range []struct {
+		name    string
+		table   string
+		columns []string
+		query   string
+	}{
+		{"players_normalized_name", "players", []string{"name"}, "CREATE INDEX IF NOT EXISTS players_normalized_name ON players(lower(name))"},
+		{"tournament_players_canonical_player", "tournament_players", []string{"canonical_player_id", "tournament_id"}, "CREATE INDEX IF NOT EXISTS tournament_players_canonical_player ON tournament_players(canonical_player_id, tournament_id)"},
+		{"matches_player1_tournament_player", "matches", []string{"player1_tournament_player_id"}, "CREATE INDEX IF NOT EXISTS matches_player1_tournament_player ON matches(player1_tournament_player_id)"},
+		{"matches_player2_tournament_player", "matches", []string{"player2_tournament_player_id"}, "CREATE INDEX IF NOT EXISTS matches_player2_tournament_player ON matches(player2_tournament_player_id)"},
+	} {
+		if err := createIndexWhenColumnsExist(repo.db, index.table, index.columns, index.query); err != nil {
+			return fmt.Errorf("create %s: %w", index.name, err)
+		}
+	}
+	return nil
+}
+
+func createIndexWhenColumnsExist(db *sql.DB, table string, requiredColumns []string, query string) error {
+	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	columns := map[string]bool{}
+	for rows.Next() {
+		var cid int
+		var name, columnType string
+		var notNull, primaryKey int
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return err
+		}
+		columns[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, column := range requiredColumns {
+		if !columns[column] {
+			return nil
+		}
+	}
+	_, err = db.Exec(query)
 	return err
 }
