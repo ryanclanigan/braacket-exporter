@@ -58,14 +58,9 @@
         return Number.isFinite(score) ? score.toFixed(3) : "—";
       }
 
-      async function loadRankings() {
-        const response = await fetch("/api/rankings?limit=100&includeRecords=false");
-        const data = await response.json();
-        if (!response.ok || data.status !== "ready") {
-          throw new Error(data.error || data.message || "Rankings are unavailable.");
-        }
+      function renderRankings(data, label = "") {
         const players = Array.isArray(data.players) ? data.players : [];
-        summary.textContent = `${data.system || "Colley"} rankings • ${data.startDate} to ${data.endDate} • ${data.minTournaments || 3}+ events`;
+        summary.textContent = `${label}${data.system || "Colley"} rankings • ${data.startDate} to ${data.endDate} • ${data.minTournaments || 3}+ events`;
         rows.innerHTML = players.length
           ? players
               .map(
@@ -81,6 +76,31 @@
               )
               .join("")
           : `<tr><td colspan="5" class="muted">No players match the default ranking.</td></tr>`;
+      }
+
+      async function loadRankings() {
+        const savedRankingsResponse = await fetch("/api/saved-rankings");
+        const savedRankings = await savedRankingsResponse.json();
+        if (!savedRankingsResponse.ok) {
+          throw new Error(savedRankings.error || "Failed to load the default ranking.");
+        }
+        const defaultRanking = (savedRankings.savedRankings || []).find((ranking) => ranking.isDefault);
+        if (defaultRanking?.id) {
+          const snapshotResponse = await fetch(`/api/saved-rankings/${defaultRanking.id}`);
+          const snapshotData = await snapshotResponse.json();
+          if (!snapshotResponse.ok) {
+            throw new Error(snapshotData.error || "Failed to load the default ranking.");
+          }
+          renderRankings(snapshotData.snapshot, `${snapshotData.savedRanking?.name || "Default"} • `);
+          return;
+        }
+
+        const response = await fetch("/api/rankings?limit=100&includeRecords=false");
+        const data = await response.json();
+        if (!response.ok || data.status !== "ready") {
+          throw new Error(data.error || data.message || "Rankings are unavailable.");
+        }
+        renderRankings(data);
       }
 
       loadRankings().catch((error) => {

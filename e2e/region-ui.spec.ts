@@ -404,11 +404,35 @@ test("identity reconcile UI reports and repairs mixed and duplicate league ident
 });
 
 test("public ranking page shows the default ranking without admin controls", async ({ page }) => {
+  let liveRankingRequests = 0;
+  await page.route("**/api/saved-rankings", async (route) => {
+    await route.fulfill({ json: { savedRankings: [{ id: 99, name: "Published Rankings", isDefault: true }] } });
+  });
+  await page.route("**/api/saved-rankings/99", async (route) => {
+    await route.fulfill({
+      json: {
+        savedRanking: { id: 99, name: "Published Rankings" },
+        snapshot: {
+          system: "elo",
+          startDate: "2026-01-01",
+          endDate: "2026-06-30",
+          minTournaments: 3,
+          players: [{ rank: 1, name: "Published Player", score: 1234, wins: 10, losses: 2, tournaments: 8 }],
+        },
+      },
+    });
+  });
+  page.on("request", (request) => {
+    if (request.url().includes("/api/rankings")) {
+      liveRankingRequests += 1;
+    }
+  });
   await page.goto(`${serverURL}/ranking`, { waitUntil: "domcontentloaded" });
 
   await expect(page).toHaveTitle("Tourknee Rankings");
-  await expect(page.locator("#ranking-summary")).toContainText("rankings");
-  await expect(page.locator("#ranking-rows")).toContainText("Dial M");
+  await expect(page.locator("#ranking-summary")).toContainText("Published Rankings");
+  await expect(page.locator("#ranking-rows")).toContainText("Published Player");
+  expect(liveRankingRequests).toBe(0);
   await expect(page.locator(".sidebar")).toHaveCount(0);
   await expect(page.locator("#sync")).toHaveCount(0);
 });
