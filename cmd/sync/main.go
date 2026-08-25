@@ -14,7 +14,7 @@ import (
 const usageText = `Usage:
   go run cmd/sync/main.go discover [--league <slug>]
   go run cmd/sync/main.go run [--league <slug>]
-  go run cmd/sync/main.go event <braacket-id-or-url> [--league <slug>] [--force]
+  go run cmd/sync/main.go event <braacket-id-or-url|parry-event-url> [--league <slug>] [--force]
   go run cmd/sync/main.go reset-event <braacket-id-or-url> [--league <slug>]
 
 Environment:

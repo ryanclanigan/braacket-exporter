@@ -119,7 +119,7 @@ What it does:
 
 ### `go run ./cmd/sync event <id-or-url> [--league <slug>] [--force]`
 
-Imports one specific tournament by Braacket id or full tournament URL.
+Imports one specific tournament by Braacket id/URL, or all brackets in a public Parry event URL. Parry imports need no API key; each bracket is stored independently so its matches contribute correctly to rankings.
 
 Examples:
 
@@ -128,6 +128,7 @@ go run ./cmd/sync event 6A7851C8-8249-4C8F-AC30-179FD9A19CE0 --league comelee
 go run ./cmd/sync event https://braacket.com/tournament/6A7851C8-8249-4C8F-AC30-179FD9A19CE0 --league comelee
 go run ./cmd/sync event 6A7851C8-8249-4C8F-AC30-179FD9A19CE0 --league comelee --force
 go run ./cmd/sync event 6A7851C8-8249-4C8F-AC30-179FD9A19CE0 --league your-league
+go run ./cmd/sync event https://parry.gg/my-tournament/my-melee-singles --league your-league
 ```
 
 Use `--force` when you want to discard the tournament's existing normalized rows and rebuild it from the live source pages.
