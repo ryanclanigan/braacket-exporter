@@ -3,15 +3,16 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <base href="../" />
     <title>Tourknee Rankings</title>
-    <link rel="icon" type="image/svg+xml" href="/assets/tourknee-mark.svg" />
-    <link rel="stylesheet" href="/app.css" />
+    <link rel="icon" type="image/svg+xml" href="assets/tourknee-mark.svg" />
+    <link rel="stylesheet" href="app.css" />
   </head>
   <body class="public-ranking-page">
     <main class="public-ranking">
       <header class="public-ranking-header">
         <div class="brand-lockup">
-          <img class="brand-mark" src="/assets/tourknee-mark.svg" alt="" />
+          <img class="brand-mark" src="assets/tourknee-mark.svg" alt="" />
           <div>
             <p class="eyebrow">Tourknee</p>
             <h1>Rankings</h1>
@@ -136,14 +137,14 @@
       }
 
       async function loadRankings() {
-        const savedRankingsResponse = await fetch("/api/saved-rankings");
+        const savedRankingsResponse = await fetch("api/saved-rankings");
         const savedRankings = await savedRankingsResponse.json();
         if (!savedRankingsResponse.ok) {
           throw new Error(savedRankings.error || "Failed to load the default ranking.");
         }
         const defaultRanking = (savedRankings.savedRankings || []).find((ranking) => ranking.isDefault);
         if (defaultRanking?.id) {
-          const snapshotResponse = await fetch(`/api/saved-rankings/${defaultRanking.id}`);
+          const snapshotResponse = await fetch(`api/saved-rankings/${defaultRanking.id}`);
           const snapshotData = await snapshotResponse.json();
           if (!snapshotResponse.ok) {
             throw new Error(snapshotData.error || "Failed to load the default ranking.");
@@ -152,7 +153,7 @@
           return;
         }
 
-        const response = await fetch("/api/rankings?limit=100&includeRecords=false");
+        const response = await fetch("api/rankings?limit=100&includeRecords=false");
         const data = await response.json();
         if (!response.ok || data.status !== "ready") {
           throw new Error(data.error || data.message || "Rankings are unavailable.");
