@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -71,6 +72,9 @@ func (s *Service) Run() error {
 }
 
 func (s *Service) SyncEvent(idOrURL string, force bool) error {
+	if isParryURL(idOrURL) {
+		return s.SyncParryEvent(idOrURL, force)
+	}
 	runID, err := s.repo.CreateRun("event")
 	if err != nil {
 		return err
@@ -100,6 +104,115 @@ func (s *Service) SyncEvent(idOrURL string, force bool) error {
 		return err
 	}
 	return s.repo.FinishRun(runID, "succeeded", fmt.Sprintf("Imported %s", tournament.BraacketID))
+}
+
+// SyncParryEvent imports every bracket exposed by one public Parry event URL.
+// Each bracket is kept as an independent tournament because rankings operate on
+// a bracket's matches, and a single Parry event can contain unrelated pools and
+// finals.
+func (s *Service) SyncParryEvent(eventURL string, force bool) error {
+	_, _, rootURL, err := ParseParryEventURL(eventURL)
+	if err != nil {
+		return err
+	}
+	runID, err := s.repo.CreateRun("parry-event")
+	if err != nil {
+		return err
+	}
+	finishFailure := func(err error) error { _ = s.repo.FinishRun(runID, "failed", err.Error()); return err }
+
+	log.Printf("[sync] Fetching Parry event: %s", rootURL)
+	eventPage := s.session.FetchHTML(rootURL, "")
+	if eventPage.HTML == nil || !eventPage.OK {
+		return finishFailure(fetchOutcomeError(eventPage, rootURL))
+	}
+	event, err := ParseParryEventPage(*eventPage.HTML)
+	if err != nil {
+		return finishFailure(err)
+	}
+	imported := 0
+	for _, phase := range event.PhasesList {
+		for _, summary := range phase.BracketsList {
+			bracketURL := rootURL + "/" + phase.Slug + "/" + summary.Slug
+			bracketID := "parry:" + strings.ReplaceAll(strings.TrimPrefix(rootURL, "https://"), "/", ":") + ":" + phase.Slug + ":" + summary.Slug
+			tournament, err := s.repo.UpsertDiscoveredTournament(runID, DiscoveredTournament{BraacketID: bracketID, URL: bracketURL, Name: stringPointer(strings.TrimSpace(event.Name + " - " + phase.Name + " - " + summary.Name))})
+			if err != nil {
+				return finishFailure(err)
+			}
+			if force {
+				if err := s.repo.ResetTournament(tournament.ID); err != nil {
+					return finishFailure(err)
+				}
+			}
+			if err := s.importParryBracket(runID, tournament, rootURL, *eventPage.HTML, eventPage.Status, event.Name, phase, bracketURL); err != nil {
+				return finishFailure(err)
+			}
+			imported++
+		}
+	}
+	if imported == 0 {
+		return finishFailure(fmt.Errorf("Parry event has no brackets to import"))
+	}
+	return s.repo.FinishRun(runID, "succeeded", fmt.Sprintf("Imported %d Parry bracket(s)", imported))
+}
+
+func (s *Service) importParryBracket(runID int, tournament *TournamentRecord, eventURL string, eventHTML string, eventStatus *int, eventName string, phase ParryPhase, bracketURL string) error {
+	attemptID, err := s.repo.BeginAttempt(runID, tournament.ID, 0)
+	if err != nil {
+		return err
+	}
+	statuses := []*int{eventStatus}
+	pagesFetched := 1
+	if err := s.repo.StoreSourcePage(runID, &tournament.ID, &attemptID, eventURL, "parry-event", eventStatus, nil, nil, &eventHTML); err != nil {
+		return err
+	}
+	page := s.session.FetchHTML(bracketURL, eventURL)
+	statuses = append(statuses, page.Status)
+	if page.OK {
+		pagesFetched++
+	}
+	if err := s.repo.StoreSourcePage(runID, &tournament.ID, &attemptID, bracketURL, "parry-bracket", page.Status, page.AntiBotClass, page.ErrorMessage, page.HTML); err != nil {
+		return err
+	}
+	if !page.OK || page.HTML == nil {
+		return s.finishParryAttempt(runID, tournament, attemptID, 2, pagesFetched, statuses, fetchOutcomeError(page, bracketURL))
+	}
+	bracket, err := ParseParryBracketPage(*page.HTML)
+	if err != nil {
+		return s.finishParryAttempt(runID, tournament, attemptID, 2, pagesFetched, statuses, err)
+	}
+	parsed := parseParryBracket(tournament.BraacketID, bracketURL, eventName, phase, bracket)
+	if len(parsed.Players) == 0 || len(parsed.Matches) == 0 {
+		return s.finishParryAttempt(runID, tournament, attemptID, 2, pagesFetched, statuses, fmt.Errorf("Parry bracket has no completed playable matches"))
+	}
+	if err := s.repo.RewriteTournamentData(tournament.ID, attemptID, parsed); err != nil {
+		return s.finishParryAttempt(runID, tournament, attemptID, 2, pagesFetched, statuses, err)
+	}
+	if err := s.repo.FinalizeAttempt(FinalizeAttemptParams{TournamentID: tournament.ID, AttemptID: attemptID, Status: "succeeded", RequestCount: 2, PagesFetched: pagesFetched, HTTPStatuses: statuses}); err != nil {
+		return err
+	}
+	return s.repo.IncrementRunCounter(runID, "imported_count", 1)
+}
+
+func (s *Service) finishParryAttempt(runID int, tournament *TournamentRecord, attemptID, requestCount, pagesFetched int, statuses []*int, err error) error {
+	message, class := err.Error(), "parry_import_error"
+	if finalizeErr := s.repo.FinalizeAttempt(FinalizeAttemptParams{TournamentID: tournament.ID, AttemptID: attemptID, Status: "failed_terminal", ErrorClass: &class, ErrorMessage: &message, RequestCount: requestCount, PagesFetched: pagesFetched, HTTPStatuses: statuses}); finalizeErr != nil {
+		return finalizeErr
+	}
+	_ = s.repo.IncrementRunCounter(runID, "failed_count", 1)
+	return err
+}
+
+func isParryURL(value string) bool {
+	parsed, err := url.Parse(value)
+	return err == nil && strings.EqualFold(parsed.Hostname(), "parry.gg")
+}
+
+func fetchOutcomeError(outcome FetchOutcome, target string) error {
+	if outcome.ErrorMessage != nil {
+		return fmt.Errorf(*outcome.ErrorMessage)
+	}
+	return fmt.Errorf("request failed for %s", target)
 }
 
 func (s *Service) ResetEvent(idOrURL string) error {

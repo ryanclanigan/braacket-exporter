@@ -78,6 +78,46 @@ func TestServiceSyncEventImportsFixtureTournament(t *testing.T) {
 	}
 }
 
+func TestServiceSyncEventImportsParryBrackets(t *testing.T) {
+	repo := openDiscoveryTestRepository(t)
+	defer repo.Close()
+	eventHTML := `<!doctype html><script>window.__remixContext = {"state":{"loaderData":{"event":{"event":{"name":"Rocky Mountain Monthly","slug":"melee-singles","phasesList":[{"name":"Final Bracket","slug":"final","bracketsList":[{"name":"Main","slug":"main"}]}]}}}}};</script>`
+	bracketHTML := `<!doctype html><script>window.__remixContext = {"state":{"loaderData":{"bracket":{"bracketProto":{"id":"main-id","name":"Main","slug":"main","seedsList":[{"id":"seed-a","seed":1,"eventEntrant":{"entrant":{"id":"entrant-a","usersList":[{"id":"user-a","gamerTag":"Alpha"}]}}},{"id":"seed-b","seed":2,"eventEntrant":{"entrant":{"id":"entrant-b","usersList":[{"id":"user-b","gamerTag":"Beta"}]}}}],"matchesList":[{"id":"match-1","identifier":"Grand Final","round":3,"state":4,"slotsList":[{"slot":1,"seedId":"seed-a","placement":0,"score":3},{"slot":2,"seedId":"seed-b","placement":1,"score":1}]}]}}}}};</script>`
+	client := roundTripClient(func(req *http.Request) (*http.Response, error) {
+		switch req.URL.String() {
+		case "https://parry.gg/rocky-monthly/melee-singles":
+			return htmlResponse(200, eventHTML), nil
+		case "https://parry.gg/rocky-monthly/melee-singles/final/main":
+			return htmlResponse(200, bracketHTML), nil
+		default:
+			return htmlResponse(404, "not found"), nil
+		}
+	})
+	policy := DefaultRetryPolicy()
+	policy.MaxRequestRetries = 0
+	session := NewBrowserSession(filepath.Join(t.TempDir(), "cookies.json"), HeaderProfile{UserAgent: "test-agent"}, policy, client)
+	session.sleepFn = func(time.Duration) {}
+	service := NewService(repo, session, SyncConfig{ListingURL: "https://braacket.com/league/comelee/tournament", RetryPolicy: policy, MaxTournamentRetry: policy.MaxTournamentRetries})
+
+	if err := service.SyncEvent("https://parry.gg/rocky-monthly/melee-singles", false); err != nil {
+		t.Fatal(err)
+	}
+	record, err := repo.GetTournamentByBraacketID("parry:parry.gg:rocky-monthly:melee-singles:final:main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.QueueState != "imported" {
+		t.Fatalf("expected imported queue state, got %q", record.QueueState)
+	}
+	players, matches, err := repo.GetDependentCounts(record.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if players != 2 || matches != 1 {
+		t.Fatalf("unexpected imported counts: players=%d matches=%d", players, matches)
+	}
+}
+
 func TestServiceRunContinuesAfterRetryableTournamentFailure(t *testing.T) {
 	repo := openDiscoveryTestRepository(t)
 	defer repo.Close()
