@@ -1252,6 +1252,20 @@ func TestStaticHandlerServesIndex(t *testing.T) {
 	}
 }
 
+func TestStaticHandlerServesPublicRanking(t *testing.T) {
+	server := &app{}
+	request := httptest.NewRequest(http.MethodGet, "/ranking", nil)
+	recorder := httptest.NewRecorder()
+
+	server.staticHandler().ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	if !strings.Contains(recorder.Body.String(), "Tourknee Rankings") {
+		t.Fatalf("expected public ranking html, got: %s", recorder.Body.String())
+	}
+}
+
 func setupSQLiteFixture(t *testing.T, dbPath string, sql string) {
 	t.Helper()
 	cmd := exec.Command("sqlite3", dbPath, sql)

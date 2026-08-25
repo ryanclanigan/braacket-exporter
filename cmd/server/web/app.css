@@ -26,6 +26,45 @@ body {
     linear-gradient(180deg, #f9f3e8, #efe4d0 55%, #eadfcf);
 }
 
+.public-ranking {
+  width: min(1100px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 48px 0 72px;
+}
+
+.public-ranking-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  gap: 24px;
+  margin-bottom: 24px;
+}
+
+.public-ranking-header .brand-lockup h1 {
+  margin: 0;
+  font-size: clamp(2rem, 6vw, 3.5rem);
+}
+
+.public-ranking-card {
+  padding: 8px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  box-shadow: var(--shadow);
+}
+
+@media (max-width: 640px) {
+  .public-ranking {
+    width: min(100% - 24px, 1100px);
+    padding-top: 28px;
+  }
+
+  .public-ranking-header {
+    align-items: start;
+    flex-direction: column;
+  }
+}
+
 .page-shell {
   min-height: 100vh;
   display: grid;

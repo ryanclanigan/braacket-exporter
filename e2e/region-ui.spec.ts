@@ -403,6 +403,16 @@ test("identity reconcile UI reports and repairs mixed and duplicate league ident
   await expect(page.locator("#reconcile-multiple-groups")).toContainText("No groups found.");
 });
 
+test("public ranking page shows the default ranking without admin controls", async ({ page }) => {
+  await page.goto(`${serverURL}/ranking`, { waitUntil: "domcontentloaded" });
+
+  await expect(page).toHaveTitle("Tourknee Rankings");
+  await expect(page.locator("#ranking-summary")).toContainText("rankings");
+  await expect(page.locator("#ranking-rows")).toContainText("Dial M");
+  await expect(page.locator(".sidebar")).toHaveCount(0);
+  await expect(page.locator("#sync")).toHaveCount(0);
+});
+
 test("rankings UI shows expandable head-to-head details", async ({ page }) => {
   await page.goto(serverURL, { waitUntil: "domcontentloaded" });
   await page.locator('a[href="#rankings"]').click();

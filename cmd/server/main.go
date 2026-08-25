@@ -1536,6 +1536,10 @@ func (a *app) staticHandler() http.Handler {
 	if err != nil {
 		panic(err)
 	}
+	rankingHTML, err := fs.ReadFile(webFiles, "ranking.html")
+	if err != nil {
+		panic(err)
+	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api/") {
@@ -1546,6 +1550,11 @@ func (a *app) staticHandler() http.Handler {
 		if path == "/" || path == "" {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			_, _ = w.Write(indexHTML)
+			return
+		}
+		if path == "/ranking" || path == "/ranking/" {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write(rankingHTML)
 			return
 		}
 		if strings.Contains(filepath.Base(path), ".") {

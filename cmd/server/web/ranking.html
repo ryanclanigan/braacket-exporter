@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Tourknee Rankings</title>
+    <link rel="icon" type="image/svg+xml" href="/assets/tourknee-mark.svg" />
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body class="public-ranking-page">
+    <main class="public-ranking">
+      <header class="public-ranking-header">
+        <div class="brand-lockup">
+          <img class="brand-mark" src="/assets/tourknee-mark.svg" alt="" />
+          <div>
+            <p class="eyebrow">Tourknee</p>
+            <h1>Rankings</h1>
+          </div>
+        </div>
+        <p id="ranking-summary" class="muted">Loading rankings…</p>
+      </header>
+
+      <section class="public-ranking-card" aria-live="polite">
+        <div id="ranking-error" class="callout warning" hidden></div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Rank</th>
+                <th>Player</th>
+                <th>Score</th>
+                <th>Record</th>
+                <th>Events</th>
+              </tr>
+            </thead>
+            <tbody id="ranking-rows"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      const summary = document.querySelector("#ranking-summary");
+      const rows = document.querySelector("#ranking-rows");
+      const errorBox = document.querySelector("#ranking-error");
+
+      function escapeHTML(value) {
+        return String(value ?? "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
+      }
+
+      function formatScore(value) {
+        const score = Number(value);
+        return Number.isFinite(score) ? score.toFixed(3) : "—";
+      }
+
+      async function loadRankings() {
+        const response = await fetch("/api/rankings?limit=100&includeRecords=false");
+        const data = await response.json();
+        if (!response.ok || data.status !== "ready") {
+          throw new Error(data.error || data.message || "Rankings are unavailable.");
+        }
+        const players = Array.isArray(data.players) ? data.players : [];
+        summary.textContent = `${data.system || "Colley"} rankings • ${data.startDate} to ${data.endDate} • ${data.minTournaments || 3}+ events`;
+        rows.innerHTML = players.length
+          ? players
+              .map(
+                (player) => `
+                  <tr>
+                    <td>${escapeHTML(player.rank)}</td>
+                    <td><strong>${escapeHTML(player.name)}</strong></td>
+                    <td>${formatScore(player.score)}</td>
+                    <td>${escapeHTML(player.wins)}–${escapeHTML(player.losses)}</td>
+                    <td>${escapeHTML(player.tournaments)}</td>
+                  </tr>
+                `
+              )
+              .join("")
+          : `<tr><td colspan="5" class="muted">No players match the default ranking.</td></tr>`;
+      }
+
+      loadRankings().catch((error) => {
+        summary.textContent = "Rankings unavailable";
+        errorBox.hidden = false;
+        errorBox.textContent = error instanceof Error ? error.message : String(error);
+      });
+    </script>
+  </body>
+</html>
