@@ -156,7 +156,9 @@ INSERT INTO players (
   (1001, 'league:l1', 'l1', 'tp1', 'Soda cup', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
   (1002, 'league:l2', 'l2', 'tp2', 'Soda cup', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
   (1003, 'league:l3', 'l3', 'tp3', 'Dial N', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
-  (1004, 'name:dial n', NULL, 'tp4', 'Dial N', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+  (1004, 'name:dial n', NULL, 'tp4', 'Dial N', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
+  (1005, 'league:f1', 'f1', 'tp5', 'Fox', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
+  (1006, 'league:f2', 'f2', 'tp6', 'Fox', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
 INSERT INTO tournament_players (id, tournament_id, attempt_id, canonical_player_id, braacket_league_player_id, name)
 VALUES
   (11, 1, 1, 363, 'lp-dial', 'Dial M'),
@@ -167,7 +169,9 @@ VALUES
   (21, 1, 1, 1001, 'l1', 'Soda cup'),
   (22, 1, 1, 1002, 'l2', 'Soda cup'),
   (23, 1, 1, 1003, 'l3', 'Dial N'),
-  (24, 1, 1, 1004, NULL, 'Dial N');
+  (24, 1, 1, 1004, NULL, 'Dial N'),
+  (25, 1, 1, 1005, 'f1', 'Fox'),
+  (26, 1, 1, 1006, 'f2', 'Fox');
 INSERT INTO matches (id, tournament_id, attempt_id, match_key, player1_tournament_player_id, player2_tournament_player_id, winner_tournament_player_id, player1_score, player2_score)
 VALUES
   (101, 1, 1, 'm1', 11, 12, 11, 3, 0),
@@ -379,17 +383,23 @@ test("identity reconcile UI reports and repairs mixed and duplicate league ident
   await expect(page.locator("#reconcile-mixed-groups")).toContainText("No groups found.");
 
   let reportRequestsAfterSelection = 0;
+  let reconciliationRequests = 0;
   page.on("request", (request) => {
     if (request.url().includes("/api/reconcile/report")) {
       reportRequestsAfterSelection += 1;
     }
+    if (request.url().includes("/api/reconcile/fix-multiple-league-ids")) {
+      reconciliationRequests += 1;
+    }
   });
   await page.locator('button[data-reconcile-action="select-keep-league-id"][data-keep-league-id="l1"]').click();
-  await expect(page.locator("#reconcile-feedback")).toContainText("Selected l1 as the ID to keep");
-  await expect(page.locator('button[data-reconcile-action="fix-multiple-league-ids"]')).toBeEnabled();
+  await page.locator('button[data-reconcile-action="select-keep-league-id"][data-keep-league-id="f1"]').click();
+  await expect(page.locator("#reconcile-feedback")).toContainText("Queued fox");
+  await expect(page.locator("#apply-selected-reconciliations")).toHaveText("Apply Selected (2)");
   expect(reportRequestsAfterSelection).toBe(0);
-  await page.locator('button[data-reconcile-action="fix-multiple-league-ids"]').click();
-  await expect(page.locator("#reconcile-feedback")).toContainText("Updated soda cup");
+  await page.locator("#apply-selected-reconciliations").click();
+  await expect(page.locator("#reconcile-feedback")).toContainText("Reconciled 2 selected groups.");
+  expect(reconciliationRequests).toBe(2);
   await expect(page.locator("#reconcile-multiple-groups")).toContainText("No groups found.");
 });
 

@@ -277,6 +277,7 @@
               <h3>Reconcile</h3>
             </div>
             <div class="panel-actions">
+              <button id="apply-selected-reconciliations" class="button-primary" type="button" disabled>Apply Selected (0)</button>
               <button id="refresh-reconcile" class="button-secondary">Refresh</button>
               <button class="button-tertiary panel-toggle" type="button" data-toggle-panel aria-expanded="true">Collapse</button>
             </div>
@@ -373,6 +374,7 @@
       const reconcileFeedback = document.querySelector("#reconcile-feedback");
       const reconcileMultipleGroups = document.querySelector("#reconcile-multiple-groups");
       const reconcileMixedGroups = document.querySelector("#reconcile-mixed-groups");
+      const applySelectedReconciliationsButton = document.querySelector("#apply-selected-reconciliations");
       const rankingMeta = document.querySelector("#ranking-meta");
       const rankingRows = document.querySelector("#ranking-rows");
       const rankingTableWrap = document.querySelector("#ranking-table-wrap");
@@ -660,6 +662,8 @@
 
       function renderReconcileReport(data) {
         reconcileState.report = data;
+        pruneQueuedReconciliations();
+        updateSelectedReconciliationsButton();
         renderReconcileGroups(
           reconcileMultipleGroups,
           Array.isArray(data.multipleLeagueIds) ? data.multipleLeagueIds : [],
@@ -705,16 +709,33 @@
                         )
                         .join("")}
                     </div>
-                    ${
-                      kind === "mixed"
-                        ? `<button class="button-primary" type="button" data-reconcile-action="fix-mixed-name-only" data-name="${escapeHTML(displayName)}">Merge Name-Only Rows</button>`
-                        : `<button class="button-primary" type="button" data-reconcile-action="fix-multiple-league-ids" data-name="${escapeHTML(displayName)}" data-normalized-name="${escapeHTML(group.normalizedName)}" data-keep-league-id="${escapeHTML(selectedKeepLeagueID)}" ${selectedKeepLeagueID ? "" : "disabled"}>Merge Other IDs</button>`
-                    }
+                    ${kind === "mixed" ? `<button class="button-primary" type="button" data-reconcile-action="fix-mixed-name-only" data-name="${escapeHTML(displayName)}">Merge Name-Only Rows</button>` : ""}
                   </article>
                 `;
               })
               .join("")
           : `<div class="muted">No groups found.</div>`;
+      }
+
+      function pruneQueuedReconciliations() {
+        const groups = Array.isArray(reconcileState.report?.multipleLeagueIds) ? reconcileState.report.multipleLeagueIds : [];
+        const validSelections = new Map(
+          groups.map((group) => [
+            group.normalizedName,
+            new Set((Array.isArray(group.players) ? group.players : []).map((player) => player.braacketLeaguePlayerId)),
+          ])
+        );
+        for (const [normalizedName, keepLeagueID] of reconcileState.keepLeagueIDByName) {
+          if (!validSelections.get(normalizedName)?.has(keepLeagueID)) {
+            reconcileState.keepLeagueIDByName.delete(normalizedName);
+          }
+        }
+      }
+
+      function updateSelectedReconciliationsButton() {
+        const count = reconcileState.keepLeagueIDByName.size;
+        applySelectedReconciliationsButton.disabled = count === 0;
+        applySelectedReconciliationsButton.textContent = `Apply Selected (${count})`;
       }
 
       function renderRankingResponse(data) {
@@ -1591,6 +1612,46 @@
         });
       });
 
+      applySelectedReconciliationsButton.addEventListener("click", () => {
+        const selections = Array.from(reconcileState.keepLeagueIDByName, ([normalizedName, keepLeagueId]) => {
+          const group = (reconcileState.report?.multipleLeagueIds || []).find((item) => item.normalizedName === normalizedName);
+          return { name: group?.players?.[0]?.name || normalizedName, keepLeagueId };
+        });
+        if (selections.length === 0) {
+          return;
+        }
+        if (!window.confirm(`Apply ${selections.length} selected reconciliation${selections.length === 1 ? "" : "s"}?`)) {
+          return;
+        }
+        applySelectedReconciliationsButton.disabled = true;
+        reconcileFeedback.textContent = `Applying ${selections.length} selected reconciliation${selections.length === 1 ? "" : "s"}...`;
+        void (async () => {
+          const completed = [];
+          const failures = [];
+          for (const selection of selections) {
+            try {
+              const data = await runReconcileAction("fix-multiple-league-ids", selection);
+              completed.push(data.result.normalizedName);
+              reconcileState.keepLeagueIDByName.delete(data.result.normalizedName);
+            } catch (error) {
+              failures.push(`${selection.name}: ${error instanceof Error ? error.message : String(error)}`);
+            }
+          }
+          try {
+            await loadReconcileReport();
+            await loadPlayers();
+            await loadRegionSearch();
+            reconcileFeedback.textContent = failures.length
+              ? `Reconciled ${completed.length} group(s). ${failures.length} failed: ${failures.join("; ")}`
+              : `Reconciled ${completed.length} selected group${completed.length === 1 ? "" : "s"}.`;
+          } catch (error) {
+            reconcileFeedback.textContent = error instanceof Error ? error.message : String(error);
+          } finally {
+            updateSelectedReconciliationsButton();
+          }
+        })();
+      });
+
       syncTournamentRows.addEventListener("click", (event) => {
         const detailButton = event.target.closest("button[data-sync-detail]");
         if (detailButton) {
@@ -1776,7 +1837,7 @@
           }
           reconcileState.keepLeagueIDByName.set(normalizedName, keepLeagueID);
           renderReconcileReport(reconcileState.report);
-          reconcileFeedback.textContent = `Selected ${keepLeagueID} as the ID to keep. Review the group, then merge the other IDs.`;
+          reconcileFeedback.textContent = `Queued ${normalizedName}; ${keepLeagueID} will be kept. Select more groups or apply the queued reconciliations.`;
           return;
         }
 
