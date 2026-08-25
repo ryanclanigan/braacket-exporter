@@ -437,6 +437,7 @@ test("public ranking page shows the default ranking without admin controls", asy
   await page.locator(".public-ranking-row").click();
   await expect(page.locator(".ranking-detail-row")).toBeVisible();
   await expect(page.locator(".ranking-detail-row")).toContainText("Rival");
+  await expect(page.locator(".ranking-h2h-item")).toHaveAttribute("style", /--h2h-bg:/);
   expect(liveRankingRequests).toBe(0);
   await expect(page.locator(".sidebar")).toHaveCount(0);
   await expect(page.locator("#sync")).toHaveCount(0);

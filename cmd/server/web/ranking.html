@@ -71,6 +71,22 @@
         );
       }
 
+      function interpolateColor(startHex, endHex, fraction) {
+        const start = startHex.match(/.{1,2}/g).map((octet) => parseInt(octet, 16) * (1 - fraction));
+        const end = endHex.match(/.{1,2}/g).map((octet) => parseInt(octet, 16) * fraction);
+        const mixed = [0, 1, 2].map((index) => Math.min(Math.round(start[index] + end[index]), 255));
+        return "#" + mixed.map((value) => value.toString(16).padStart(2, "0")).join("");
+      }
+
+      function recordColor(record) {
+        const wins = Number(record.wins || 0);
+        const losses = Number(record.losses || 0);
+        const score = (1 + wins) / (2 + wins + losses);
+        return score >= 0.5
+          ? interpolateColor("FEF9C3", "16A34A", (score - 0.5) * 2)
+          : interpolateColor("DC2626", "FEF9C3", score * 2);
+      }
+
       function renderH2H(records) {
         const opponents = Array.isArray(records) ? records : [];
         if (!opponents.length) {
@@ -81,7 +97,7 @@
             <div class="ranking-h2h-heading"><strong>Head To Head</strong><span class="muted">${opponents.length} opponent${opponents.length === 1 ? "" : "s"}</span></div>
             <div class="ranking-h2h-list">
               ${opponents.map((record) => `
-                <div class="ranking-h2h-item">
+                <div class="ranking-h2h-item" style="--h2h-bg: ${recordColor(record)}">
                   <div class="ranking-h2h-rank">${Number(record.opponentRank) > 0 ? `#${escapeHTML(record.opponentRank)}` : "UR"}</div>
                   <div class="ranking-h2h-opponent"><strong>${escapeHTML(record.opponent || "Unknown")}</strong></div>
                   <div class="ranking-h2h-score"><span class="wins">${escapeHTML(record.wins || 0)}</span><span class="muted">-</span><span class="losses">${escapeHTML(record.losses || 0)}</span></div>
