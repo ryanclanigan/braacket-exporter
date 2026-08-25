@@ -378,7 +378,17 @@ test("identity reconcile UI reports and repairs mixed and duplicate league ident
   await expect(page.locator("#reconcile-feedback")).toContainText("Updated dial n");
   await expect(page.locator("#reconcile-mixed-groups")).toContainText("No groups found.");
 
-  await page.locator('button[data-reconcile-action="fix-multiple-league-ids"][data-keep-league-id="l1"]').click();
+  let reportRequestsAfterSelection = 0;
+  page.on("request", (request) => {
+    if (request.url().includes("/api/reconcile/report")) {
+      reportRequestsAfterSelection += 1;
+    }
+  });
+  await page.locator('button[data-reconcile-action="select-keep-league-id"][data-keep-league-id="l1"]').click();
+  await expect(page.locator("#reconcile-feedback")).toContainText("Selected l1 as the ID to keep");
+  await expect(page.locator('button[data-reconcile-action="fix-multiple-league-ids"]')).toBeEnabled();
+  expect(reportRequestsAfterSelection).toBe(0);
+  await page.locator('button[data-reconcile-action="fix-multiple-league-ids"]').click();
   await expect(page.locator("#reconcile-feedback")).toContainText("Updated soda cup");
   await expect(page.locator("#reconcile-multiple-groups")).toContainText("No groups found.");
 });

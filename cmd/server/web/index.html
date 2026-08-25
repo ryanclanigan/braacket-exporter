@@ -429,6 +429,11 @@
         filterSignature: "",
       };
 
+      const reconcileState = {
+        report: null,
+        keepLeagueIDByName: new Map(),
+      };
+
       function defaultDate(offsetDays) {
         const value = new Date();
         value.setDate(value.getDate() + offsetDays);
@@ -654,6 +659,7 @@
       }
 
       function renderReconcileReport(data) {
+        reconcileState.report = data;
         renderReconcileGroups(
           reconcileMultipleGroups,
           Array.isArray(data.multipleLeagueIds) ? data.multipleLeagueIds : [],
@@ -671,6 +677,7 @@
           ? groups
               .map((group) => {
                 const displayName = group.players?.[0]?.name || group.normalizedName;
+                const selectedKeepLeagueID = reconcileState.keepLeagueIDByName.get(group.normalizedName) || "";
                 return `
                   <article class="detail-card">
                     <div class="detail-card-header">
@@ -690,7 +697,7 @@
                               </div>
                               ${
                                 kind === "multiple" && player.braacketLeaguePlayerId
-                                  ? `<button class="button-secondary" type="button" data-reconcile-action="fix-multiple-league-ids" data-name="${escapeHTML(displayName)}" data-keep-league-id="${escapeHTML(player.braacketLeaguePlayerId)}">Keep This ID</button>`
+                                  ? `<button class="button-secondary${selectedKeepLeagueID === player.braacketLeaguePlayerId ? " is-active" : ""}" type="button" aria-pressed="${selectedKeepLeagueID === player.braacketLeaguePlayerId}" data-reconcile-action="select-keep-league-id" data-normalized-name="${escapeHTML(group.normalizedName)}" data-keep-league-id="${escapeHTML(player.braacketLeaguePlayerId)}">${selectedKeepLeagueID === player.braacketLeaguePlayerId ? "ID to Keep" : "Keep This ID"}</button>`
                                   : ""
                               }
                             </div>
@@ -701,7 +708,7 @@
                     ${
                       kind === "mixed"
                         ? `<button class="button-primary" type="button" data-reconcile-action="fix-mixed-name-only" data-name="${escapeHTML(displayName)}">Merge Name-Only Rows</button>`
-                        : ""
+                        : `<button class="button-primary" type="button" data-reconcile-action="fix-multiple-league-ids" data-name="${escapeHTML(displayName)}" data-normalized-name="${escapeHTML(group.normalizedName)}" data-keep-league-id="${escapeHTML(selectedKeepLeagueID)}" ${selectedKeepLeagueID ? "" : "disabled"}>Merge Other IDs</button>`
                     }
                   </article>
                 `;
@@ -1757,7 +1764,23 @@
         }
         const action = button.dataset.reconcileAction;
         const name = button.dataset.name;
-        if (!action || !name) {
+        if (!action) {
+          return;
+        }
+
+        if (action === "select-keep-league-id") {
+          const normalizedName = button.dataset.normalizedName;
+          const keepLeagueID = button.dataset.keepLeagueId;
+          if (!normalizedName || !keepLeagueID || !reconcileState.report) {
+            return;
+          }
+          reconcileState.keepLeagueIDByName.set(normalizedName, keepLeagueID);
+          renderReconcileReport(reconcileState.report);
+          reconcileFeedback.textContent = `Selected ${keepLeagueID} as the ID to keep. Review the group, then merge the other IDs.`;
+          return;
+        }
+
+        if (!name) {
           return;
         }
 
