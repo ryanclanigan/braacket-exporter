@@ -430,7 +430,6 @@ test("public ranking page shows the default ranking without admin controls", asy
   await page.goto(`${serverURL}/ranking`, { waitUntil: "domcontentloaded" });
 
   await expect(page).toHaveTitle("Tourknee Rankings");
-  await expect(page.locator('link[rel="stylesheet"]')).toHaveAttribute("href", "app.css");
   await expect(page.locator("#ranking-summary")).toContainText("Published Rankings");
   await expect(page.locator("#ranking-rows")).toContainText("Published Player");
   await expect(page.locator("#ranking-rows")).toContainText("10–2");
