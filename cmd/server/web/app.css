@@ -544,6 +544,15 @@ th {
   background: rgba(255, 250, 240, 0.45);
 }
 
+.public-ranking-row {
+  cursor: pointer;
+}
+
+.public-ranking-row:hover td,
+.public-ranking-row:focus-visible td {
+  background: rgba(14, 107, 92, 0.08);
+}
+
 .ranking-h2h-panel {
   display: grid;
   gap: 8px;

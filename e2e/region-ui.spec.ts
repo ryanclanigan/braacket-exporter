@@ -417,7 +417,7 @@ test("public ranking page shows the default ranking without admin controls", asy
           startDate: "2026-01-01",
           endDate: "2026-06-30",
           minTournaments: 3,
-          players: [{ rank: 1, name: "Published Player", score: 1234, wins: 10, losses: 2, tournaments: 8 }],
+          players: [{ rank: 1, name: "Published Player", score: 1234, wins: 10, losses: 2, tournaments: 8, records: [{ opponent: "Rival", wins: 2, losses: 1, opponentRank: 2 }] }],
         },
       },
     });
@@ -432,6 +432,11 @@ test("public ranking page shows the default ranking without admin controls", asy
   await expect(page).toHaveTitle("Tourknee Rankings");
   await expect(page.locator("#ranking-summary")).toContainText("Published Rankings");
   await expect(page.locator("#ranking-rows")).toContainText("Published Player");
+  await expect(page.locator("#ranking-rows")).toContainText("10–2");
+  await expect(page.locator("#ranking-rows")).toContainText("8");
+  await page.locator(".public-ranking-row").click();
+  await expect(page.locator(".ranking-detail-row")).toBeVisible();
+  await expect(page.locator(".ranking-detail-row")).toContainText("Rival");
   expect(liveRankingRequests).toBe(0);
   await expect(page.locator(".sidebar")).toHaveCount(0);
   await expect(page.locator("#sync")).toHaveCount(0);

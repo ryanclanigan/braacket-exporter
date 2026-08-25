@@ -58,21 +58,62 @@
         return Number.isFinite(score) ? score.toFixed(3) : "—";
       }
 
+      function totalRecord(player) {
+        if (Number.isFinite(Number(player.wins)) && Number.isFinite(Number(player.losses))) {
+          return { wins: Number(player.wins), losses: Number(player.losses) };
+        }
+        return (Array.isArray(player.records) ? player.records : []).reduce(
+          (total, record) => ({
+            wins: total.wins + Number(record.wins || 0),
+            losses: total.losses + Number(record.losses || 0),
+          }),
+          { wins: 0, losses: 0 },
+        );
+      }
+
+      function renderH2H(records) {
+        const opponents = Array.isArray(records) ? records : [];
+        if (!opponents.length) {
+          return `<div class="ranking-h2h-panel"><div class="muted">No head-to-head records are available for this player.</div></div>`;
+        }
+        return `
+          <div class="ranking-h2h-panel">
+            <div class="ranking-h2h-heading"><strong>Head To Head</strong><span class="muted">${opponents.length} opponent${opponents.length === 1 ? "" : "s"}</span></div>
+            <div class="ranking-h2h-list">
+              ${opponents.map((record) => `
+                <div class="ranking-h2h-item">
+                  <div class="ranking-h2h-rank">${Number(record.opponentRank) > 0 ? `#${escapeHTML(record.opponentRank)}` : "UR"}</div>
+                  <div class="ranking-h2h-opponent"><strong>${escapeHTML(record.opponent || "Unknown")}</strong></div>
+                  <div class="ranking-h2h-score"><span class="wins">${escapeHTML(record.wins || 0)}</span><span class="muted">-</span><span class="losses">${escapeHTML(record.losses || 0)}</span></div>
+                  <div class="ranking-h2h-summary muted">${Number(record.wins || 0) + Number(record.losses || 0)} set${Number(record.wins || 0) + Number(record.losses || 0) === 1 ? "" : "s"}</div>
+                </div>
+              `).join("")}
+            </div>
+          </div>`;
+      }
+
       function renderRankings(data, label = "") {
         const players = Array.isArray(data.players) ? data.players : [];
         summary.textContent = `${label}${data.system || "Colley"} rankings • ${data.startDate} to ${data.endDate} • ${data.minTournaments || 3}+ events`;
         rows.innerHTML = players.length
           ? players
               .map(
-                (player) => `
-                  <tr>
+                (player, index) => {
+                  const record = totalRecord(player);
+                  const playerKey = String(player.canonicalPlayerId || player.name || index);
+                  const events = Number.isFinite(Number(player.tournaments)) ? player.tournaments : "—";
+                  return `
+                  <tr class="public-ranking-row" data-player-key="${escapeHTML(playerKey)}" tabindex="0" aria-expanded="false">
                     <td>${escapeHTML(player.rank)}</td>
                     <td><strong>${escapeHTML(player.name)}</strong></td>
                     <td>${formatScore(player.score)}</td>
-                    <td>${escapeHTML(player.wins)}–${escapeHTML(player.losses)}</td>
-                    <td>${escapeHTML(player.tournaments)}</td>
+                    <td>${record.wins}–${record.losses}</td>
+                    <td>${escapeHTML(events)}</td>
                   </tr>
-                `
+                  <tr class="ranking-detail-row" data-player-detail="${escapeHTML(playerKey)}" hidden>
+                    <td colspan="5">${renderH2H(player.records)}</td>
+                  </tr>`;
+                }
               )
               .join("")
           : `<tr><td colspan="5" class="muted">No players match the default ranking.</td></tr>`;
@@ -107,6 +148,23 @@
         summary.textContent = "Rankings unavailable";
         errorBox.hidden = false;
         errorBox.textContent = error instanceof Error ? error.message : String(error);
+      });
+
+      rows.addEventListener("click", (event) => {
+        const row = event.target.closest(".public-ranking-row");
+        if (!row) return;
+        const detail = rows.querySelector(`[data-player-detail="${CSS.escape(row.dataset.playerKey)}"]`);
+        if (!detail) return;
+        const expanded = row.getAttribute("aria-expanded") === "true";
+        row.setAttribute("aria-expanded", String(!expanded));
+        detail.hidden = expanded;
+      });
+
+      rows.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          event.target.closest(".public-ranking-row")?.click();
+        }
       });
     </script>
   </body>
