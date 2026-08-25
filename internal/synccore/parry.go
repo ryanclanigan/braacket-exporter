@@ -5,15 +5,33 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 )
 
 // ParryEvent is the small, stable portion of Parry's public Remix loader data
 // that we need to import completed bracket results.  Keeping this independent
 // from Parry's private gRPC API means manual imports require no API key.
 type ParryEvent struct {
-	Name       string       `json:"name"`
-	Slug       string       `json:"slug"`
-	PhasesList []ParryPhase `json:"phasesList"`
+	Name           string       `json:"name"`
+	Slug           string       `json:"slug"`
+	StartDate      ParryTime    `json:"startDate"`
+	TournamentName string       `json:"-"`
+	TournamentDate string       `json:"-"`
+	PhasesList     []ParryPhase `json:"phasesList"`
+}
+
+type ParryTime struct {
+	Seconds int64 `json:"seconds"`
+}
+
+type parryBreadcrumbHierarchy struct {
+	PathsList []parryBreadcrumbPath `json:"pathsList"`
+}
+
+type parryBreadcrumbPath struct {
+	Type      int       `json:"type"`
+	Name      string    `json:"name"`
+	StartTime ParryTime `json:"startTime"`
 }
 
 type ParryPhase struct {
@@ -93,9 +111,25 @@ func ParseParryEventPage(html string) (ParryEvent, error) {
 	for _, value := range data {
 		encoded, _ := json.Marshal(value)
 		var candidate struct {
-			Event ParryEvent `json:"event"`
+			Event               ParryEvent               `json:"event"`
+			BreadcrumbHierarchy parryBreadcrumbHierarchy `json:"breadcrumbHierarchy"`
 		}
 		if json.Unmarshal(encoded, &candidate) == nil && len(candidate.Event.PhasesList) > 0 {
+			candidate.Event.TournamentName = candidate.Event.Name
+			dateSeconds := candidate.Event.StartDate.Seconds
+			for _, path := range candidate.BreadcrumbHierarchy.PathsList {
+				if path.Type != 0 {
+					continue
+				}
+				if strings.TrimSpace(path.Name) != "" {
+					candidate.Event.TournamentName = strings.TrimSpace(path.Name)
+				}
+				if path.StartTime.Seconds > 0 {
+					dateSeconds = path.StartTime.Seconds
+				}
+				break
+			}
+			candidate.Event.TournamentDate = parryDate(dateSeconds)
 			return candidate.Event, nil
 		}
 	}
@@ -190,6 +224,17 @@ func parseParryBracket(tournamentID string, bracketURL string, eventName string,
 		name = strings.TrimSpace(eventName + " - " + bracket.Name)
 	}
 	return ParsedTournament{BraacketID: tournamentID, URL: bracketURL, Name: stringPointer(name), Players: dedupePlayers(players), Matches: dedupeMatches(matches)}
+}
+
+func parryDate(seconds int64) string {
+	if seconds <= 0 {
+		return ""
+	}
+	denver, err := time.LoadLocation("America/Denver")
+	if err != nil {
+		denver = time.Local
+	}
+	return time.Unix(seconds, 0).In(denver).Format("2006-01-02")
 }
 
 func parrySeedPlayer(seed ParrySeed) (ParsedTournamentPlayer, bool) {

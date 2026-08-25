@@ -81,7 +81,7 @@ func TestServiceSyncEventImportsFixtureTournament(t *testing.T) {
 func TestServiceSyncEventImportsParryBrackets(t *testing.T) {
 	repo := openDiscoveryTestRepository(t)
 	defer repo.Close()
-	eventHTML := `<!doctype html><script>window.__remixContext = {"state":{"loaderData":{"event":{"event":{"name":"Rocky Mountain Monthly","slug":"melee-singles","phasesList":[{"name":"Final Bracket","slug":"final","bracketsList":[{"name":"Main","slug":"main"}]}]}}}}};</script>`
+	eventHTML := `<!doctype html><script>window.__remixContext = {"state":{"loaderData":{"event":{"event":{"name":"Melee Singles","slug":"melee-singles","startDate":{"seconds":1787620500},"phasesList":[{"name":"Final Bracket","slug":"final","bracketsList":[{"name":"Main","slug":"main"}]}]},"breadcrumbHierarchy":{"pathsList":[{"type":0,"name":"Rocky Mountain Monthly","startTime":{"seconds":1787616000}}]}}}}};</script>`
 	bracketHTML := `<!doctype html><script>window.__remixContext = {"state":{"loaderData":{"bracket":{"bracketProto":{"id":"main-id","name":"Main","slug":"main","seedsList":[{"id":"seed-a","seed":1,"eventEntrant":{"entrant":{"id":"entrant-a","usersList":[{"id":"user-a","gamerTag":"Alpha"}]}}},{"id":"seed-b","seed":2,"eventEntrant":{"entrant":{"id":"entrant-b","usersList":[{"id":"user-b","gamerTag":"Beta"}]}}}],"matchesList":[{"id":"match-1","identifier":"Grand Final","round":3,"state":4,"slotsList":[{"slot":1,"seedId":"seed-a","placement":0,"score":3},{"slot":2,"seedId":"seed-b","placement":1,"score":1}]}]}}}}};</script>`
 	client := roundTripClient(func(req *http.Request) (*http.Response, error) {
 		switch req.URL.String() {
@@ -115,6 +115,9 @@ func TestServiceSyncEventImportsParryBrackets(t *testing.T) {
 	}
 	if players != 2 || matches != 1 {
 		t.Fatalf("unexpected imported counts: players=%d matches=%d", players, matches)
+	}
+	if record.Name.String != "Rocky Mountain Monthly - Melee Singles - Final Bracket - Main" || record.TournamentDate.String != "2026-08-24" {
+		t.Fatalf("unexpected Parry metadata: name=%q date=%q", record.Name.String, record.TournamentDate.String)
 	}
 }
 

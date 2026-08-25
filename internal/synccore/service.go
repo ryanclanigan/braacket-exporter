@@ -135,7 +135,8 @@ func (s *Service) SyncParryEvent(eventURL string, force bool) error {
 		for _, summary := range phase.BracketsList {
 			bracketURL := rootURL + "/" + phase.Slug + "/" + summary.Slug
 			bracketID := "parry:" + strings.ReplaceAll(strings.TrimPrefix(rootURL, "https://"), "/", ":") + ":" + phase.Slug + ":" + summary.Slug
-			tournament, err := s.repo.UpsertDiscoveredTournament(runID, DiscoveredTournament{BraacketID: bracketID, URL: bracketURL, Name: stringPointer(strings.TrimSpace(event.Name + " - " + phase.Name + " - " + summary.Name))})
+			name := strings.TrimSpace(event.TournamentName + " - " + event.Name + " - " + phase.Name + " - " + summary.Name)
+			tournament, err := s.repo.UpsertDiscoveredTournament(runID, DiscoveredTournament{BraacketID: bracketID, URL: bracketURL, Name: stringPointer(name)})
 			if err != nil {
 				return finishFailure(err)
 			}
@@ -144,7 +145,7 @@ func (s *Service) SyncParryEvent(eventURL string, force bool) error {
 					return finishFailure(err)
 				}
 			}
-			if err := s.importParryBracket(runID, tournament, rootURL, *eventPage.HTML, eventPage.Status, event.Name, phase, bracketURL); err != nil {
+			if err := s.importParryBracket(runID, tournament, rootURL, *eventPage.HTML, eventPage.Status, event, phase, bracketURL); err != nil {
 				return finishFailure(err)
 			}
 			imported++
@@ -156,7 +157,7 @@ func (s *Service) SyncParryEvent(eventURL string, force bool) error {
 	return s.repo.FinishRun(runID, "succeeded", fmt.Sprintf("Imported %d Parry bracket(s)", imported))
 }
 
-func (s *Service) importParryBracket(runID int, tournament *TournamentRecord, eventURL string, eventHTML string, eventStatus *int, eventName string, phase ParryPhase, bracketURL string) error {
+func (s *Service) importParryBracket(runID int, tournament *TournamentRecord, eventURL string, eventHTML string, eventStatus *int, event ParryEvent, phase ParryPhase, bracketURL string) error {
 	attemptID, err := s.repo.BeginAttempt(runID, tournament.ID, 0)
 	if err != nil {
 		return err
@@ -181,7 +182,11 @@ func (s *Service) importParryBracket(runID int, tournament *TournamentRecord, ev
 	if err != nil {
 		return s.finishParryAttempt(runID, tournament, attemptID, 2, pagesFetched, statuses, err)
 	}
-	parsed := parseParryBracket(tournament.BraacketID, bracketURL, eventName, phase, bracket)
+	parsed := parseParryBracket(tournament.BraacketID, bracketURL, event.TournamentName+" - "+event.Name, phase, bracket)
+	if event.TournamentDate != "" {
+		parsed.DateText = stringPointer(event.TournamentDate)
+		parsed.TournamentDate = stringPointer(event.TournamentDate)
+	}
 	if len(parsed.Players) == 0 || len(parsed.Matches) == 0 {
 		return s.finishParryAttempt(runID, tournament, attemptID, 2, pagesFetched, statuses, fmt.Errorf("Parry bracket has no completed playable matches"))
 	}
