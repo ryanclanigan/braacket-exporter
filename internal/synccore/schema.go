@@ -42,6 +42,13 @@ CREATE TABLE IF NOT EXISTS tournaments (
   FOREIGN KEY(first_seen_run_id) REFERENCES sync_runs(id)
 );
 
+CREATE TABLE IF NOT EXISTS parry_bracket_preferences (
+  braacket_id TEXT PRIMARY KEY,
+  import_enabled INTEGER NOT NULL DEFAULT 1,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY(braacket_id) REFERENCES tournaments(braacket_id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS tournament_import_attempts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   tournament_id INTEGER NOT NULL,

@@ -560,6 +560,28 @@ func (r *Repository) UpsertDiscoveredTournament(runID int, tournament Discovered
 	return r.GetTournamentByID(current.ID)
 }
 
+func (r *Repository) SetParryBracketImportEnabled(braacketID string, enabled bool) error {
+	_, err := r.db.Exec(`
+INSERT INTO parry_bracket_preferences (braacket_id, import_enabled, updated_at)
+VALUES (?, ?, ?)
+ON CONFLICT(braacket_id) DO UPDATE SET
+  import_enabled = excluded.import_enabled,
+  updated_at = excluded.updated_at`, braacketID, boolToInt(enabled), nowISO())
+	return err
+}
+
+func (r *Repository) ParryBracketImportEnabled(braacketID string) (enabled bool, configured bool, err error) {
+	var value int
+	err = r.db.QueryRow(`SELECT import_enabled FROM parry_bracket_preferences WHERE braacket_id = ?`, braacketID).Scan(&value)
+	if errors.Is(err, sql.ErrNoRows) {
+		return true, false, nil
+	}
+	if err != nil {
+		return false, false, err
+	}
+	return value != 0, true, nil
+}
+
 func (r *Repository) ListPendingTournamentIDs(now string) ([]int, error) {
 	rows, err := r.db.Query(
 		`SELECT id FROM tournaments

@@ -121,6 +121,53 @@ func TestServiceSyncEventImportsParryBrackets(t *testing.T) {
 	}
 }
 
+func TestServiceSyncParryEventPersistsBracketSelection(t *testing.T) {
+	repo := openDiscoveryTestRepository(t)
+	defer repo.Close()
+	eventHTML := `<!doctype html><script>window.__remixContext = {"state":{"loaderData":{"event":{"event":{"name":"Melee Singles","slug":"melee-singles","startDate":{"seconds":1787620500},"phasesList":[{"name":"Main Bracket","slug":"main","bracketsList":[{"name":"Main","slug":"main"}]},{"name":"Amateur Bracket","slug":"amateur","bracketsList":[{"name":"Amateur","slug":"amateur"}]}]},"breadcrumbHierarchy":{"pathsList":[{"type":0,"name":"Rocky Mountain Monthly","startTime":{"seconds":1787616000}}]}}}}};</script>`
+	bracketHTML := `<!doctype html><script>window.__remixContext = {"state":{"loaderData":{"bracket":{"bracketProto":{"id":"bracket-id","name":"Main","slug":"main","seedsList":[{"id":"seed-a","seed":1,"eventEntrant":{"entrant":{"id":"entrant-a","usersList":[{"id":"user-a","gamerTag":"Alpha"}]}}},{"id":"seed-b","seed":2,"eventEntrant":{"entrant":{"id":"entrant-b","usersList":[{"id":"user-b","gamerTag":"Beta"}]}}}],"matchesList":[{"id":"match-1","identifier":"Grand Final","round":3,"state":4,"slotsList":[{"slot":1,"seedId":"seed-a","placement":0,"score":3},{"slot":2,"seedId":"seed-b","placement":1,"score":1}]}]}}}}};</script>`
+	client := roundTripClient(func(req *http.Request) (*http.Response, error) {
+		switch req.URL.String() {
+		case "https://parry.gg/rocky-monthly/melee-singles":
+			return htmlResponse(200, eventHTML), nil
+		case "https://parry.gg/rocky-monthly/melee-singles/main/main", "https://parry.gg/rocky-monthly/melee-singles/amateur/amateur":
+			return htmlResponse(200, bracketHTML), nil
+		default:
+			return htmlResponse(404, "not found"), nil
+		}
+	})
+	policy := DefaultRetryPolicy()
+	policy.MaxRequestRetries = 0
+	session := NewBrowserSession(filepath.Join(t.TempDir(), "cookies.json"), HeaderProfile{UserAgent: "test-agent"}, policy, client)
+	session.sleepFn = func(time.Duration) {}
+	service := NewService(repo, session, SyncConfig{ListingURL: "https://braacket.com/league/comelee/tournament", RetryPolicy: policy, MaxTournamentRetry: policy.MaxTournamentRetries})
+
+	preview, err := service.PreviewParryEvent("https://parry.gg/rocky-monthly/melee-singles")
+	if err != nil || len(preview) != 2 || preview[1].Selector != "amateur/amateur" {
+		t.Fatalf("unexpected Parry preview: %#v, %v", preview, err)
+	}
+	if err := service.SyncParryEventSelected("https://parry.gg/rocky-monthly/melee-singles", false, []string{"main/main"}); err != nil {
+		t.Fatal(err)
+	}
+	amateurID := "parry:parry.gg:rocky-monthly:melee-singles:amateur:amateur"
+	amateur, err := repo.GetTournamentByBraacketID(amateurID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if players, matches, err := repo.GetDependentCounts(amateur.ID); err != nil || players != 0 || matches != 0 {
+		t.Fatalf("expected excluded bracket to have no imported data: players=%d matches=%d err=%v", players, matches, err)
+	}
+	if enabled, configured, err := repo.ParryBracketImportEnabled(amateurID); err != nil || !configured || enabled {
+		t.Fatalf("expected amateur bracket preference to be disabled: enabled=%t configured=%t err=%v", enabled, configured, err)
+	}
+	if err := service.SyncEvent("https://parry.gg/rocky-monthly/melee-singles", true); err != nil {
+		t.Fatal(err)
+	}
+	if players, matches, err := repo.GetDependentCounts(amateur.ID); err != nil || players != 0 || matches != 0 {
+		t.Fatalf("expected persisted exclusion after force import: players=%d matches=%d err=%v", players, matches, err)
+	}
+}
+
 func TestServiceRunContinuesAfterRetryableTournamentFailure(t *testing.T) {
 	repo := openDiscoveryTestRepository(t)
 	defer repo.Close()

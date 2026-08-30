@@ -48,6 +48,21 @@ type ParryBracket struct {
 	MatchesList []ParryMatch `json:"matchesList"`
 }
 
+type ParryBracketPreview struct {
+	ID       string `json:"id"`
+	Phase    string `json:"phase"`
+	Bracket  string `json:"bracket"`
+	Selector string `json:"selector"`
+}
+
+func parryBracketID(rootURL string, phase ParryPhase, bracket ParryBracket) string {
+	return "parry:" + strings.ReplaceAll(strings.TrimPrefix(rootURL, "https://"), "/", ":") + ":" + phase.Slug + ":" + bracket.Slug
+}
+
+func parryBracketSelector(phase ParryPhase, bracket ParryBracket) string {
+	return phase.Slug + "/" + bracket.Slug
+}
+
 type ParrySeed struct {
 	ID               string             `json:"id"`
 	Seed             int                `json:"seed"`

@@ -14,7 +14,8 @@ import (
 const usageText = `Usage:
   go run cmd/sync/main.go discover [--league <slug>]
   go run cmd/sync/main.go run [--league <slug>]
-  go run cmd/sync/main.go event <braacket-id-or-url|parry-event-url> [--league <slug>] [--force]
+  go run cmd/sync/main.go parry-preview <parry-event-url> [--league <slug>]
+  go run cmd/sync/main.go event <braacket-id-or-url|parry-event-url> [--league <slug>] [--force] [--parry-bracket <phase-slug/bracket-slug> ...]
   go run cmd/sync/main.go reset-event <braacket-id-or-url> [--league <slug>]
 
 Environment:
@@ -69,10 +70,22 @@ func main() {
 		}
 		fmt.Println("Queue drained")
 	case "event":
-		if err := service.SyncEvent(config.target, config.force); err != nil {
+		if len(config.parryBrackets) > 0 {
+			if err := service.SyncParryEventSelected(config.target, config.force, config.parryBrackets); err != nil {
+				log.Fatal(err)
+			}
+		} else if err := service.SyncEvent(config.target, config.force); err != nil {
 			log.Fatal(err)
 		}
 		fmt.Printf("Imported %s\n", config.target)
+	case "parry-preview":
+		brackets, err := service.PreviewParryEvent(config.target)
+		if err != nil {
+			log.Fatal(err)
+		}
+		for _, bracket := range brackets {
+			fmt.Printf("%s\t%s\t%s\n", bracket.Selector, bracket.Phase, bracket.Bracket)
+		}
 	case "reset-event":
 		if err := service.ResetEvent(config.target); err != nil {
 			log.Fatal(err)
@@ -87,6 +100,7 @@ type cliConfig struct {
 	command       string
 	target        string
 	force         bool
+	parryBrackets []string
 	leagueSlug    string
 	dbPath        string
 	cookieJarPath string
@@ -98,12 +112,13 @@ func parseArgs(args []string) (cliConfig, error) {
 	}
 
 	command := args[0]
-	if command != "discover" && command != "run" && command != "event" && command != "reset-event" {
+	if command != "discover" && command != "run" && command != "event" && command != "parry-preview" && command != "reset-event" {
 		return cliConfig{}, fmt.Errorf(usageText)
 	}
 
 	target := ""
 	force := false
+	parryBrackets := []string{}
 	leagueSlug := ""
 	for index := 1; index < len(args); index += 1 {
 		switch args[index] {
@@ -114,6 +129,11 @@ func parseArgs(args []string) (cliConfig, error) {
 			}
 		case "--force":
 			force = true
+		case "--parry-bracket":
+			if index+1 < len(args) {
+				parryBrackets = append(parryBrackets, args[index+1])
+				index += 1
+			}
 		default:
 			if !strings.HasPrefix(args[index], "--") && target == "" {
 				target = args[index]
@@ -126,7 +146,7 @@ func parseArgs(args []string) (cliConfig, error) {
 	if leagueSlug == "" {
 		return cliConfig{}, fmt.Errorf("missing Braacket league slug\n\n%s", usageText)
 	}
-	if (command == "event" || command == "reset-event") && target == "" {
+	if (command == "event" || command == "parry-preview" || command == "reset-event") && target == "" {
 		return cliConfig{}, fmt.Errorf("missing tournament id or URL\n\n%s", usageText)
 	}
 
@@ -146,6 +166,7 @@ func parseArgs(args []string) (cliConfig, error) {
 		command:       command,
 		target:        target,
 		force:         force,
+		parryBrackets: parryBrackets,
 		leagueSlug:    leagueSlug,
 		dbPath:        dbPath,
 		cookieJarPath: cookieJarPath,
