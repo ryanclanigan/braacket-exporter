@@ -946,15 +946,47 @@ func (r *Repository) resolveCanonicalPlayerIDTx(tx *sql.Tx, player ParsedTournam
 			}
 			return *id, nil
 		}
-	} else {
-		normalized := canonicalizePlayerName(player.Name)
-		if id, err := r.getCanonicalPlayerIDFromAliasTx(tx, "normalized_name", normalized); err != nil {
-			return 0, err
-		} else if id != nil {
-			if err := r.touchCanonicalPlayerTx(tx, *id, player.Name, player.BraacketPlayerID); err != nil {
+	}
+
+	normalized := canonicalizePlayerName(player.Name)
+	if id, err := r.getCanonicalPlayerIDFromAliasTx(tx, "normalized_name", normalized); err != nil {
+		return 0, err
+	} else if id != nil {
+		if player.BraacketLeaguePlayerID != nil {
+			if _, err := r.insertPlayerAliasTx(tx, "league_id", *player.BraacketLeaguePlayerID, *id); err != nil {
 				return 0, err
 			}
-			return *id, nil
+		}
+		if err := r.touchCanonicalPlayerTx(tx, *id, player.Name, player.BraacketPlayerID); err != nil {
+			return 0, err
+		}
+		return *id, nil
+	}
+	if player.BraacketLeaguePlayerID != nil {
+		rows, err := tx.Query(`SELECT id FROM players WHERE lower(name) = ?`, normalized)
+		if err != nil {
+			return 0, err
+		}
+		defer rows.Close()
+		ids := []int{}
+		for rows.Next() {
+			var id int
+			if err := rows.Scan(&id); err != nil {
+				return 0, err
+			}
+			ids = append(ids, id)
+		}
+		if err := rows.Err(); err != nil {
+			return 0, err
+		}
+		if len(ids) == 1 {
+			if _, err := r.insertPlayerAliasTx(tx, "league_id", *player.BraacketLeaguePlayerID, ids[0]); err != nil {
+				return 0, err
+			}
+			if err := r.touchCanonicalPlayerTx(tx, ids[0], player.Name, player.BraacketPlayerID); err != nil {
+				return 0, err
+			}
+			return ids[0], nil
 		}
 	}
 
@@ -983,6 +1015,14 @@ func (r *Repository) resolveCanonicalPlayerIDTx(tx *sql.Tx, player ParsedTournam
 		return 0, err
 	}
 	return id, nil
+}
+
+func (r *Repository) insertPlayerAliasTx(tx *sql.Tx, aliasType, aliasValue string, playerID int) (bool, error) {
+	_, err := tx.Exec(`INSERT INTO player_identity_aliases (alias_type, alias_value, canonical_player_id, created_at) VALUES (?, ?, ?, ?)`, aliasType, aliasValue, playerID, nowISO())
+	if err != nil && !strings.Contains(err.Error(), "UNIQUE constraint failed") {
+		return false, err
+	}
+	return err == nil, nil
 }
 
 func (r *Repository) getCanonicalPlayerIDFromAliasTx(tx *sql.Tx, aliasType string, aliasValue string) (*int, error) {

@@ -6,7 +6,7 @@ import (
 )
 
 func TestUpsertDiscoveredTournamentCreatesAndRefreshes(t *testing.T) {
-	repo := openTestRepository(t)
+	repo := openDiscoveryTestRepository(t)
 	defer repo.Close()
 
 	runID, err := repo.CreateRun("discover")
@@ -41,6 +41,30 @@ func TestUpsertDiscoveredTournamentCreatesAndRefreshes(t *testing.T) {
 	}
 	if !record.Name.Valid || record.Name.String != "Weekly 1 Updated" {
 		t.Fatalf("expected updated name, got %#v", record.Name)
+	}
+}
+
+func TestResolveCanonicalPlayerMatchesUnambiguousParryName(t *testing.T) {
+	repo := openDiscoveryTestRepository(t)
+	defer repo.Close()
+	mustExec(t, repo, `INSERT INTO players (id, canonical_name, name, first_seen_at, last_seen_at) VALUES (1, 'name:dial m', 'Dial M', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`)
+	tx, err := repo.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := repo.resolveCanonicalPlayerIDTx(tx, ParsedTournamentPlayer{Name: "Dial M", BraacketLeaguePlayerID: stringPointer("parry:user-1")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if id != 1 {
+		t.Fatalf("expected existing player, got %d", id)
+	}
+	var aliasID int
+	if err := repo.db.QueryRow(`SELECT canonical_player_id FROM player_identity_aliases WHERE alias_type='league_id' AND alias_value='parry:user-1'`).Scan(&aliasID); err != nil || aliasID != 1 {
+		t.Fatalf("expected Parry alias on existing player: id=%d err=%v", aliasID, err)
 	}
 }
 
