@@ -582,6 +582,23 @@ func (r *Repository) ParryBracketImportEnabled(braacketID string) (enabled bool,
 	return value != 0, true, nil
 }
 
+func (r *Repository) SetParryEventBracketImportEnabled(eventID, selector string, enabled bool) error {
+	_, err := r.db.Exec(`INSERT INTO parry_event_bracket_preferences (event_id, selector, import_enabled, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(event_id, selector) DO UPDATE SET import_enabled=excluded.import_enabled, updated_at=excluded.updated_at`, eventID, selector, boolToInt(enabled), nowISO())
+	return err
+}
+
+func (r *Repository) ParryEventBracketImportEnabled(eventID, selector string) (bool, bool, error) {
+	var value int
+	err := r.db.QueryRow(`SELECT import_enabled FROM parry_event_bracket_preferences WHERE event_id = ? AND selector = ?`, eventID, selector).Scan(&value)
+	if errors.Is(err, sql.ErrNoRows) {
+		return true, false, nil
+	}
+	if err != nil {
+		return false, false, err
+	}
+	return value != 0, true, nil
+}
+
 func (r *Repository) ListPendingTournamentIDs(now string) ([]int, error) {
 	rows, err := r.db.Query(
 		`SELECT id FROM tournaments

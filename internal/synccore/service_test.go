@@ -102,7 +102,7 @@ func TestServiceSyncEventImportsParryBrackets(t *testing.T) {
 	if err := service.SyncEvent("https://parry.gg/rocky-monthly/melee-singles", false); err != nil {
 		t.Fatal(err)
 	}
-	record, err := repo.GetTournamentByBraacketID("parry:parry.gg:rocky-monthly:melee-singles:final:main")
+	record, err := repo.GetTournamentByBraacketID("parry:parry.gg:rocky-monthly:melee-singles")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +116,7 @@ func TestServiceSyncEventImportsParryBrackets(t *testing.T) {
 	if players != 2 || matches != 1 {
 		t.Fatalf("unexpected imported counts: players=%d matches=%d", players, matches)
 	}
-	if record.Name.String != "Rocky Mountain Monthly - Melee Singles - Final Bracket - Main" || record.TournamentDate.String != "2026-08-24" {
+	if record.Name.String != "Rocky Mountain Monthly - Melee Singles" || record.TournamentDate.String != "2026-08-24" {
 		t.Fatalf("unexpected Parry metadata: name=%q date=%q", record.Name.String, record.TournamentDate.String)
 	}
 }
@@ -149,21 +149,21 @@ func TestServiceSyncParryEventPersistsBracketSelection(t *testing.T) {
 	if err := service.SyncParryEventSelected("https://parry.gg/rocky-monthly/melee-singles", false, []string{"main/main"}); err != nil {
 		t.Fatal(err)
 	}
-	amateurID := "parry:parry.gg:rocky-monthly:melee-singles:amateur:amateur"
-	amateur, err := repo.GetTournamentByBraacketID(amateurID)
+	eventID := "parry:parry.gg:rocky-monthly:melee-singles"
+	event, err := repo.GetTournamentByBraacketID(eventID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if players, matches, err := repo.GetDependentCounts(amateur.ID); err != nil || players != 0 || matches != 0 {
-		t.Fatalf("expected excluded bracket to have no imported data: players=%d matches=%d err=%v", players, matches, err)
+	if players, matches, err := repo.GetDependentCounts(event.ID); err != nil || players != 2 || matches != 1 {
+		t.Fatalf("expected only selected bracket data: players=%d matches=%d err=%v", players, matches, err)
 	}
-	if enabled, configured, err := repo.ParryBracketImportEnabled(amateurID); err != nil || !configured || enabled {
+	if enabled, configured, err := repo.ParryEventBracketImportEnabled(eventID, "amateur/amateur"); err != nil || !configured || enabled {
 		t.Fatalf("expected amateur bracket preference to be disabled: enabled=%t configured=%t err=%v", enabled, configured, err)
 	}
 	if err := service.SyncEvent("https://parry.gg/rocky-monthly/melee-singles", true); err != nil {
 		t.Fatal(err)
 	}
-	if players, matches, err := repo.GetDependentCounts(amateur.ID); err != nil || players != 0 || matches != 0 {
+	if players, matches, err := repo.GetDependentCounts(event.ID); err != nil || players != 2 || matches != 1 {
 		t.Fatalf("expected persisted exclusion after force import: players=%d matches=%d err=%v", players, matches, err)
 	}
 }

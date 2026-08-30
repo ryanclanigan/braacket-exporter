@@ -49,6 +49,14 @@ CREATE TABLE IF NOT EXISTS parry_bracket_preferences (
   FOREIGN KEY(braacket_id) REFERENCES tournaments(braacket_id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS parry_event_bracket_preferences (
+  event_id TEXT NOT NULL,
+  selector TEXT NOT NULL,
+  import_enabled INTEGER NOT NULL DEFAULT 1,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY(event_id, selector)
+);
+
 CREATE TABLE IF NOT EXISTS tournament_import_attempts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   tournament_id INTEGER NOT NULL,
