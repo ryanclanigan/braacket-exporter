@@ -119,7 +119,7 @@ What it does:
 
 ### `go run ./cmd/sync event <id-or-url> [--league <slug>] [--force]`
 
-Imports one specific tournament by Braacket id/URL, or all brackets in a public Parry event URL. Parry imports need no API key; each bracket is stored independently so its matches contribute correctly to rankings.
+Imports one specific tournament by Braacket id/URL, or all enabled brackets in a public Parry event URL. Parry imports need no API key; each bracket is stored independently so its matches contribute correctly to rankings.
 
 Examples:
 
@@ -130,6 +130,21 @@ go run ./cmd/sync event 6A7851C8-8249-4C8F-AC30-179FD9A19CE0 --league comelee --
 go run ./cmd/sync event 6A7851C8-8249-4C8F-AC30-179FD9A19CE0 --league your-league
 go run ./cmd/sync event https://parry.gg/my-tournament/my-melee-singles --league your-league
 ```
+
+For a multiphase Parry event, preview the available brackets and then explicitly select the ones to import:
+
+```bash
+go run ./cmd/sync parry-preview https://parry.gg/my-tournament/my-melee-singles --league your-league
+# selector                         phase             bracket
+# main/main                        Main Bracket      Main
+# amateur/amateur-bracket          Amateur Bracket   Amateur
+
+go run ./cmd/sync event https://parry.gg/my-tournament/my-melee-singles \
+  --league your-league \
+  --parry-bracket main/main
+```
+
+The selected brackets are remembered. Future imports of that event, including `--force`, continue to skip deselected brackets until you explicitly select them again.
 
 Use `--force` when you want to discard the tournament's existing normalized rows and rebuild it from the live source pages.
 
