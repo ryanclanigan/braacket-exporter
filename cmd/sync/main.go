@@ -2,11 +2,13 @@ package main
 
 import (
 	"braacketreplacement/internal/synccore"
+	"bufio"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -74,6 +76,22 @@ func main() {
 			if err := service.SyncParryEventSelected(config.target, config.force, config.parryBrackets); err != nil {
 				log.Fatal(err)
 			}
+		} else if isParryEventURL(config.target) {
+			brackets, err := service.PreviewParryEvent(config.target)
+			if err != nil {
+				log.Fatal(err)
+			}
+			if parryEventHasMultiplePhases(brackets) {
+				selected, err := promptParryBracketSelection(brackets)
+				if err != nil {
+					log.Fatal(err)
+				}
+				if err := service.SyncParryEventSelected(config.target, config.force, selected); err != nil {
+					log.Fatal(err)
+				}
+			} else if err := service.SyncEvent(config.target, config.force); err != nil {
+				log.Fatal(err)
+			}
 		} else if err := service.SyncEvent(config.target, config.force); err != nil {
 			log.Fatal(err)
 		}
@@ -94,6 +112,50 @@ func main() {
 	default:
 		log.Fatal(usageText)
 	}
+}
+
+func isParryEventURL(value string) bool {
+	return strings.Contains(strings.ToLower(value), "parry.gg/")
+}
+
+func parryEventHasMultiplePhases(brackets []synccore.ParryBracketPreview) bool {
+	phases := map[string]bool{}
+	for _, bracket := range brackets {
+		phases[bracket.Phase] = true
+	}
+	return len(phases) > 1
+}
+
+func promptParryBracketSelection(brackets []synccore.ParryBracketPreview) ([]string, error) {
+	info, err := os.Stdin.Stat()
+	if err != nil || info.Mode()&os.ModeCharDevice == 0 {
+		return nil, fmt.Errorf("Parry event has multiple phases; pass one or more --parry-bracket <phase-slug/bracket-slug> options")
+	}
+	fmt.Println("This Parry event has multiple phases. Select brackets to import:")
+	for index, bracket := range brackets {
+		fmt.Printf("  %d) [%s] %s\n", index+1, bracket.Phase, bracket.Bracket)
+	}
+	fmt.Print("Enter comma-separated numbers (for example 1,3): ")
+	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err != nil {
+		return nil, err
+	}
+	selected := []string{}
+	seen := map[int]bool{}
+	for _, value := range strings.Split(strings.TrimSpace(line), ",") {
+		index, err := strconv.Atoi(strings.TrimSpace(value))
+		if err != nil || index < 1 || index > len(brackets) {
+			return nil, fmt.Errorf("invalid bracket selection %q", value)
+		}
+		if !seen[index] {
+			selected = append(selected, brackets[index-1].Selector)
+			seen[index] = true
+		}
+	}
+	if len(selected) == 0 {
+		return nil, fmt.Errorf("select at least one Parry bracket")
+	}
+	return selected, nil
 }
 
 type cliConfig struct {
