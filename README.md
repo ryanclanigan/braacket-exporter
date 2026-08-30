@@ -146,6 +146,8 @@ go run ./cmd/sync event https://parry.gg/my-tournament/my-melee-singles \
 
 The selected brackets are remembered. Future imports of that event, including `--force`, continue to skip deselected brackets until you explicitly select them again.
 
+When `event` is run from an interactive terminal against a Parry event with multiple phases, it displays this same list and requires you to choose numbered brackets. In automation, pass `--parry-bracket` explicitly.
+
 Use `--force` when you want to discard the tournament's existing normalized rows and rebuild it from the live source pages.
 
 ### `go run ./cmd/sync reset-event <id-or-url> [--league <slug>]`
