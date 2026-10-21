@@ -1200,7 +1200,8 @@ func (a *app) handleReconcileFixMixedNameOnly(w http.ResponseWriter, r *http.Req
 		return
 	}
 	var request struct {
-		Name string `json:"name"`
+		Name               string `json:"name"`
+		AllowPlayedMatches bool   `json:"allowPlayedMatches"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -1212,7 +1213,7 @@ func (a *app) handleReconcileFixMixedNameOnly(w http.ResponseWriter, r *http.Req
 		return
 	}
 	defer db.Close()
-	result, err := reconcile.NewService(db).FixMixedLeagueAndNameOnly(request.Name)
+	result, err := reconcile.NewService(db).FixMixedLeagueAndNameOnlyWithOptions(request.Name, reconcile.MixedNameOnlyOptions{AllowPlayedMatches: request.AllowPlayedMatches})
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return

@@ -136,6 +136,14 @@ GROUP BY lower(p.name), p.id, p.canonical_name, p.braacket_league_player_id, p.n
 }
 
 func (s *Service) FixMixedLeagueAndNameOnly(displayName string) (IdentityRepairResult, error) {
+	return s.FixMixedLeagueAndNameOnlyWithOptions(displayName, MixedNameOnlyOptions{})
+}
+
+type MixedNameOnlyOptions struct {
+	AllowPlayedMatches bool
+}
+
+func (s *Service) FixMixedLeagueAndNameOnlyWithOptions(displayName string, options MixedNameOnlyOptions) (IdentityRepairResult, error) {
 	normalizedName := canonicalizePlayerName(displayName)
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -177,9 +185,9 @@ func (s *Service) FixMixedLeagueAndNameOnly(displayName string) (IdentityRepairR
 		if err != nil {
 			return IdentityRepairResult{}, err
 		}
-		if profile.TotalMatches > profile.DQMatches {
+		if profile.TotalMatches > profile.DQMatches && !options.AllowPlayedMatches {
 			return IdentityRepairResult{}, fmt.Errorf(
-				"refusing to merge %s: name-only canonical player %d has %d non-DQ match(es)",
+				"refusing to merge %s: name-only canonical player %d has %d non-DQ match(es); enable Include played matches after confirming these records belong to the same player",
 				normalizedName,
 				player.CanonicalPlayerID,
 				profile.TotalMatches-profile.DQMatches,

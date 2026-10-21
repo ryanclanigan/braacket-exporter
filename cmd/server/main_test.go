@@ -1029,7 +1029,7 @@ VALUES
   (11, 1, 1, 4, NULL, 'Dial M');
 INSERT INTO matches (id, tournament_id, attempt_id, match_key, player1_tournament_player_id, player2_tournament_player_id, winner_tournament_player_id, player1_score, player2_score, player1_name, player2_name, winner_name)
 VALUES
-  (101, 1, 1, 'm1', 10, 11, 10, 0, -1, 'Soda cup', 'Dial M', 'Soda cup');
+  (101, 1, 1, 'm1', 10, 11, 10, 2, 1, 'Soda cup', 'Dial M', 'Soda cup');
 `)
 
 	server := &app{dbPath: dbPath}
@@ -1044,7 +1044,12 @@ VALUES
 		t.Fatalf("expected both reconcile groups in report: %s", reportBody)
 	}
 
-	mixedRequest := httptest.NewRequest(http.MethodPost, "/api/reconcile/fix-mixed-name-only", strings.NewReader(`{"name":"Dial M"}`))
+	blockedRecorder := httptest.NewRecorder()
+	server.handleReconcileFixMixedNameOnly(blockedRecorder, httptest.NewRequest(http.MethodPost, "/api/reconcile/fix-mixed-name-only", strings.NewReader(`{"name":"Dial M"}`)))
+	if blockedRecorder.Code != http.StatusBadRequest || !strings.Contains(blockedRecorder.Body.String(), "non-DQ match") {
+		t.Fatalf("expected played matches to require explicit opt-in: %d %s", blockedRecorder.Code, blockedRecorder.Body.String())
+	}
+	mixedRequest := httptest.NewRequest(http.MethodPost, "/api/reconcile/fix-mixed-name-only", strings.NewReader(`{"name":"Dial M","allowPlayedMatches":true}`))
 	mixedRequest.Header.Set("Content-Type", "application/json")
 	mixedRecorder := httptest.NewRecorder()
 	server.handleReconcileFixMixedNameOnly(mixedRecorder, mixedRequest)
@@ -1053,6 +1058,19 @@ VALUES
 	}
 	if !strings.Contains(mixedRecorder.Body.String(), `"targetCanonicalPlayerID": 3`) {
 		t.Fatalf("expected target id 3 in mixed repair: %s", mixedRecorder.Body.String())
+	}
+	db, err := openReconcileDB(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var canonicalID, score1, score2, winnerID int
+	if err := db.QueryRow(`SELECT tp.canonical_player_id, m.player1_score, m.player2_score, m.winner_tournament_player_id
+FROM matches m JOIN tournament_players tp ON tp.id=m.player2_tournament_player_id WHERE m.id=101`).Scan(&canonicalID, &score1, &score2, &winnerID); err != nil {
+		t.Fatal(err)
+	}
+	if canonicalID != 3 || score1 != 2 || score2 != 1 || winnerID != 10 {
+		t.Fatalf("merge failed to preserve played result: player=%d scores=%d-%d winner=%d", canonicalID, score1, score2, winnerID)
 	}
 
 	multipleRequest := httptest.NewRequest(http.MethodPost, "/api/reconcile/fix-multiple-league-ids", strings.NewReader(`{"name":"Soda cup","keepLeagueId":"l1"}`))
