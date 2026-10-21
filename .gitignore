@@ -13,3 +13,5 @@ braacket.sqlite
 /server
 node_modules/
 test-results/
+tournies.txt
+/outputs/
