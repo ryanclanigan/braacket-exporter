@@ -1279,7 +1279,7 @@ func TestStaticHandlerServesPublicRanking(t *testing.T) {
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", recorder.Code)
 	}
-	if !strings.Contains(recorder.Body.String(), "Tourknee Rankings") {
+	if !strings.Contains(recorder.Body.String(), "<title>CO Melee</title>") {
 		t.Fatalf("expected public ranking html, got: %s", recorder.Body.String())
 	}
 }

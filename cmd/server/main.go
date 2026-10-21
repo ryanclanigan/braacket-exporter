@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io/fs"
 	"log"
 	"net/http"
@@ -1553,9 +1554,9 @@ func (a *app) staticHandler() http.Handler {
 			_, _ = w.Write(indexHTML)
 			return
 		}
-		if path == "/ranking" || path == "/ranking/" {
+		if path == "/ranking" || path == "/ranking/" || path == "/ranking.html" {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			_, _ = w.Write(rankingHTML)
+			_, _ = w.Write(a.publicRankingHTML(rankingHTML))
 			return
 		}
 		if strings.Contains(filepath.Base(path), ".") {
@@ -1566,6 +1567,42 @@ func (a *app) staticHandler() http.Handler {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write(indexHTML)
 	})
+}
+
+// Link preview crawlers need metadata in the initial HTML response, before JS runs.
+func (a *app) publicRankingHTML(page []byte) []byte {
+	title := "CO Melee"
+	description := "View the latest CO Melee rankings, player records, and tournament results."
+	db, err := sql.Open("sqlite3", "file:"+a.dbPath+"?mode=ro&_busy_timeout=1000")
+	if err == nil {
+		defer db.Close()
+		if entry, err := savedrankings.NewService(db).GetDefault(); err == nil {
+			description = fmt.Sprintf("%s rankings • %s to %s • %d players.", strings.ToUpper(entry.Query.System), entry.Query.StartDate, entry.Query.EndDate, entry.Snapshot.TotalPlayers)
+			leaders := []string{}
+			for i, player := range entry.Snapshot.Players {
+				if i >= 3 {
+					break
+				}
+				if name, ok := player["name"].(string); ok && name != "" {
+					leaders = append(leaders, fmt.Sprintf("%d. %s", i+1, name))
+				}
+			}
+			if len(leaders) > 0 {
+				description += " " + strings.Join(leaders, " • ")
+			}
+		}
+	}
+	title, description = html.EscapeString(title), html.EscapeString(description)
+	metadata := fmt.Sprintf(`<title>%s</title>
+    <meta name="description" content="%s" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="CO Melee" />
+    <meta property="og:title" content="%s" />
+    <meta property="og:description" content="%s" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="%s" />
+    <meta name="twitter:description" content="%s" />`, title, description, title, description, title, description)
+	return []byte(strings.Replace(string(page), "<title>Tourknee Rankings</title>", metadata, 1))
 }
 
 func requestLogMiddleware(next http.Handler) http.Handler {
