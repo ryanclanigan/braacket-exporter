@@ -709,7 +709,11 @@
                         )
                         .join("")}
                     </div>
-                    ${kind === "mixed" ? `<button class="button-primary" type="button" data-reconcile-action="fix-mixed-name-only" data-name="${escapeHTML(displayName)}">Merge Name-Only Rows</button>` : ""}
+                    ${kind === "mixed" ? `
+                      <label><input type="checkbox" data-reconcile-allow-played> Include played matches</label>
+                      <p class="muted">Select this if these records belong to the same player and include completed sets beyond DQs.</p>
+                      <button class="button-primary" type="button" data-reconcile-action="fix-mixed-name-only" data-name="${escapeHTML(displayName)}">Merge Name-Only Rows</button>
+                    ` : ""}
                   </article>
                 `;
               })
@@ -1848,11 +1852,13 @@
         const payload =
           action === "fix-multiple-league-ids"
             ? { name, keepLeagueId: button.dataset.keepLeagueId || "" }
-            : { name };
+            : { name, allowPlayedMatches: Boolean(button.closest(".detail-card")?.querySelector("[data-reconcile-allow-played]")?.checked) };
         const confirmMessage =
           action === "fix-multiple-league-ids"
             ? `Keep ${payload.keepLeagueId} for ${name} and merge the other same-name league IDs?`
-            : `Merge name-only fallback rows into the league-backed canonical player for ${name}?`;
+            : payload.allowPlayedMatches
+              ? `Merge all name-only records for ${name}, including played matches, into the league-backed player? This combines their match history and affects rankings.`
+              : `Merge name-only fallback rows into the league-backed canonical player for ${name}?`;
         if (!window.confirm(confirmMessage)) {
           return;
         }
