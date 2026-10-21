@@ -181,6 +181,36 @@ VALUES (20, 1, 1, 2, 'l2', 'Soda cup');
 	assertTournamentPlayerTarget(t, db, 20, 1)
 }
 
+func TestFixMultipleLeagueIDsNormalizesStoredNames(t *testing.T) {
+	for _, name := range []string{"Qu33 (Cornflower) ", "  Qu33   (Cornflower)  ", "Qu33\t(Cornflower)\u00a0"} {
+		t.Run(name, func(t *testing.T) {
+			db := openTestDB(t)
+			defer db.Close()
+			seedMinimalImportGraph(t, db)
+			for id, leagueID := range []string{"braacket-qu33", "parry-qu33"} {
+				_, err := db.Exec(`INSERT INTO players (id, canonical_name, braacket_league_player_id, name, first_seen_at, last_seen_at)
+VALUES (?, ?, ?, ?, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`, id+1, "league:"+leagueID, leagueID, name)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := db.Exec(`INSERT INTO tournament_players (id, tournament_id, attempt_id, canonical_player_id, name) VALUES (20, 1, 1, 2, ?)`, name); err != nil {
+				t.Fatal(err)
+			}
+			result, err := NewService(db).FixMultipleLeagueIDs("Qu33 (Cornflower)", "braacket-qu33")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.TargetCanonicalPlayerID != 1 || result.TournamentPlayerRowsUpdated != 1 {
+				t.Fatalf("unexpected repair result: %#v", result)
+			}
+			assertSinglePlayerRow(t, db, 1, "league:braacket-qu33")
+			assertAlias(t, db, "league_id", "parry-qu33", 1)
+			assertTournamentPlayerTarget(t, db, 20, 1)
+		})
+	}
+}
+
 func TestFixMultipleLeagueIDsRefusesConflictingVariants(t *testing.T) {
 	db := openTestDB(t)
 	defer db.Close()

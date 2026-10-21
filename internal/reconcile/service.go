@@ -298,10 +298,10 @@ func (s *Service) listPlayersByNormalizedName(tx *sql.Tx, normalizedName string)
 SELECT
   id AS canonical_player_id,
   canonical_name,
-  COALESCE(braacket_league_player_id, '')
+  COALESCE(braacket_league_player_id, ''),
+  name
 FROM players
-WHERE lower(name) = ?
-ORDER BY id`, normalizedName)
+ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -310,8 +310,14 @@ ORDER BY id`, normalizedName)
 	result := []identityPlayerRow{}
 	for rows.Next() {
 		var item identityPlayerRow
-		if err := rows.Scan(&item.CanonicalPlayerID, &item.CanonicalName, &item.BraacketLeaguePlayerID); err != nil {
+		var name string
+		if err := rows.Scan(&item.CanonicalPlayerID, &item.CanonicalName, &item.BraacketLeaguePlayerID, &name); err != nil {
 			return nil, err
+		}
+		// Use the same whitespace and case normalization as the repair request
+		// and tournament variant checks; SQLite lower(name) leaves whitespace intact.
+		if canonicalizePlayerName(name) != normalizedName {
+			continue
 		}
 		result = append(result, item)
 	}
