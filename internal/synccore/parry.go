@@ -97,6 +97,7 @@ type ParryMatch struct {
 }
 
 type ParryMatchSlot struct {
+	State     int    `json:"state"`
 	Slot      int    `json:"slot"`
 	SeedID    string `json:"seedId"`
 	Placement int    `json:"placement"`
@@ -228,6 +229,14 @@ func parseParryBracket(tournamentID string, bracketURL string, eventName string,
 		key := match.ID
 		if key == "" {
 			key = tournamentID + ":" + round + ":" + left.SeedID + ":" + right.SeedID
+		}
+		// Parry marks DQs on the slot (state 3), often with a 0-0 score.
+		// Normalize to the negative-score convention used by all ranking systems.
+		if left.State == 3 {
+			left.Score = -1
+		}
+		if right.State == 3 {
+			right.Score = -1
 		}
 		status := "completed"
 		matches = append(matches, ParsedMatch{MatchKey: key, StageName: &stage, RoundName: &round, Player1BraacketPlayerID: leftPlayer.BraacketPlayerID, Player1Name: stringPointer(leftPlayer.Name), Player2BraacketPlayerID: rightPlayer.BraacketPlayerID, Player2Name: stringPointer(rightPlayer.Name), Player1Score: intPointer(left.Score), Player2Score: intPointer(right.Score), WinnerBraacketPlayerID: winnerID, WinnerName: stringPointer(winner.Name), Status: &status})
