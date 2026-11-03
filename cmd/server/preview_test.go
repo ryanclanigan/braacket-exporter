@@ -46,7 +46,7 @@ func TestPublicRankingPreview(t *testing.T) {
 	}
 	for _, path := range []string{"/ranking", "/ranking/", "/ranking.html"} {
 		page := get(path)
-		for _, want := range []string{`property="og:title" content="CO Melee"`, `property="og:site_name" content="CO Melee"`, "ELO rankings • 2026-07-01 to 2026-09-14 • 42 players.", "1. A&amp;B • 2. Grillindude • 3. Qu33", `name="twitter:card" content="summary"`} {
+		for _, want := range []string{`property="og:title" content="CO Melee"`, `property="og:site_name" content="CO Melee"`, "ELO rankings • 2026-07-01 to 2026-09-14 • 42 players.\n1. A&amp;B\n2. Grillindude\n3. Qu33", `name="twitter:card" content="summary"`} {
 			if !strings.Contains(page, want) {
 				t.Errorf("%s missing %s", path, want)
 			}

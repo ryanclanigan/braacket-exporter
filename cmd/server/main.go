@@ -1609,7 +1609,7 @@ func (a *app) publicRankingHTML(page []byte) []byte {
 				}
 			}
 			if len(leaders) > 0 {
-				description += " " + strings.Join(leaders, " • ")
+				description += "\n" + strings.Join(leaders, "\n")
 			}
 		}
 	}
