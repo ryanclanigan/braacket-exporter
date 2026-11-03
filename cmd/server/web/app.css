@@ -27,7 +27,7 @@ body {
 }
 
 .public-ranking {
-  width: min(1100px, calc(100% - 32px));
+  width: min(1240px, calc(100% - 32px));
   margin: 0 auto;
   padding: 48px 0 72px;
 }
@@ -46,11 +46,62 @@ body {
 }
 
 .public-ranking-card {
+  grid-area: rankings;
+  min-width: 0;
   padding: 8px;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 20px;
   box-shadow: var(--shadow);
+}
+
+.public-ranking-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 260px;
+  grid-template-areas: "rankings guide";
+  align-items: start;
+  gap: 24px;
+}
+
+.ranking-attendance-guide {
+  grid-area: guide;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--panel);
+  font-size: .9rem;
+  line-height: 1.5;
+}
+
+.ranking-attendance-guide h2 {
+  margin: 0;
+  font-size: 1.2rem;
+}
+
+.ranking-attendance-guide dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.ranking-attendance-guide dd {
+  margin: 0;
+  white-space: nowrap;
+  font-weight: bold;
+}
+
+.ranking-attendance-guide p:last-child {
+  margin-bottom: 0;
+}
+
+@media (max-width: 960px) {
+  .public-ranking-layout {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "guide" "rankings";
+    gap: 16px;
+  }
 }
 
 @media (max-width: 640px) {

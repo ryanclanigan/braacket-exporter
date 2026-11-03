@@ -20,6 +20,19 @@
         <p id="ranking-summary" class="muted">Loading rankings…</p>
       </header>
 
+      <div class="public-ranking-layout">
+      <aside class="ranking-attendance-guide" aria-labelledby="attendance-guide-title">
+        <h2 id="attendance-guide-title">Attendance points</h2>
+        <p>Earn points for events in this ranking period:</p>
+        <dl>
+          <div><dt>Fewer than 8 entrants</dt><dd>0 points</dd></div>
+          <div><dt>8–31 entrants</dt><dd>1 point</dd></div>
+          <div><dt>32+ entrants</dt><dd>2 points</dd></div>
+        </dl>
+        <p><strong>Winner bonus:</strong> +1 point when you win an event with 32+ entrants.</p>
+        <p><strong>Series cap:</strong> 8 points per tournament series, including win bonuses. All Foco Weekly Wednesdays count toward the same cap.</p>
+        <p class="muted">Events where you were DQed do not count.</p>
+      </aside>
       <section class="public-ranking-card" aria-live="polite">
         <div id="ranking-error" class="callout warning" hidden></div>
         <div class="table-wrap">
@@ -38,6 +51,7 @@
           </table>
         </div>
       </section>
+      </div>
     </main>
 
     <script>
