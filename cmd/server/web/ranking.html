@@ -31,6 +31,7 @@
                 <th>Score</th>
                 <th>Record</th>
                 <th>Events</th>
+                <th title="Under 8 entrants: 0 points; 8–31: 1; 32+: 2, plus 1 for winning. Maximum 8 per series. DQs excluded.">Attendance points</th>
               </tr>
             </thead>
             <tbody id="ranking-rows"></tbody>
@@ -159,6 +160,27 @@
         }
       }
 
+      async function loadAttendancePoints() {
+        const cells = [...rows.querySelectorAll(".ranking-attendance")];
+        cells.forEach((cell) => { cell.textContent = "…"; });
+        try {
+          const response = await fetch(`api/attendance?${new URLSearchParams(rankingFilters)}`);
+          if (!response.ok) throw new Error("Attendance unavailable");
+          const totals = await response.json();
+          for (const cell of cells) {
+            const total = totals[cell.dataset.playerId] || { points: 0, events: 0, series: {} };
+            cell.textContent = total.points;
+            cell.title = Object.entries(total.series).sort(([a], [b]) => a.localeCompare(b))
+              .map(([series, points]) => `${series}: ${points}`).join("\n") || "No attendance points in this ranking period.";
+            cell.previousElementSibling.textContent = total.events;
+          }
+        } catch (_) {
+          cells.forEach((cell) => {
+            cell.innerHTML = '<button type="button" class="ranking-attendance-retry" title="Could not load attendance points. Retry">Retry</button>';
+          });
+        }
+      }
+
       function renderRankings(data, label = "") {
         rankingFilters = { startDate: data.startDate, endDate: data.endDate };
         if (data.tournamentNameLike) rankingFilters.tournamentNameLike = data.tournamentNameLike;
@@ -178,9 +200,10 @@
                     <td>${formatScore(player.score)}</td>
                     <td>${record.wins}–${record.losses}</td>
                     <td>${escapeHTML(events)}</td>
+                    <td class="ranking-attendance" data-player-id="${escapeHTML(player.canonicalPlayerId || "")}">…</td>
                   </tr>
                   <tr class="ranking-detail-row" data-player-detail="${escapeHTML(playerKey)}" data-player-id="${escapeHTML(player.canonicalPlayerId || "")}" hidden>
-                    <td colspan="5">
+                    <td colspan="6">
                       <section class="ranking-events-panel" aria-label="Player events">
                         <div class="ranking-h2h-heading"><strong>Events</strong><span class="muted">In this ranking period</span></div>
                         <div class="ranking-events-content" aria-live="polite"></div>
@@ -191,7 +214,8 @@
                 }
               )
               .join("")
-          : `<tr><td colspan="5" class="muted">No players match the default ranking.</td></tr>`;
+          : `<tr><td colspan="6" class="muted">No players match the default ranking.</td></tr>`;
+        if (players.length) loadAttendancePoints();
       }
 
       async function loadRankings() {
@@ -226,6 +250,10 @@
       });
 
       rows.addEventListener("click", (event) => {
+        if (event.target.closest(".ranking-attendance-retry")) {
+          loadAttendancePoints();
+          return;
+        }
         if (event.target.closest(".ranking-events-retry")) {
           loadPlayerEvents(event.target.closest(".ranking-detail-row"));
           return;
