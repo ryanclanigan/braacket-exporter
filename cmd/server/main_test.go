@@ -281,6 +281,10 @@ VALUES
 INSERT INTO tournament_players (id, tournament_id, canonical_player_id, name)
 VALUES
   (11, 1, 1, 'Alice'),
+  (12, 1, 2, 'Bob'),
+  (13, 1, 2, 'BOB'),
+  (14, 1, NULL, 'Unknown entrant'),
+  (15, 1, 1, 'Alice duplicate entry'),
   (21, 2, 1, 'Alice'),
   (31, 3, 1, 'ALICE!');
 `)
@@ -311,6 +315,24 @@ VALUES
 	}
 	if !strings.Contains(body, `"eventName": "Weekly Wednesday #2"`) {
 		t.Fatalf("expected final suffix to collapse into event name stem: %s", body)
+	}
+	var result playerEventsResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.TotalBracketEntries != 3 {
+		t.Fatalf("duplicate player entries must not repeat brackets: %#v", result)
+	}
+	for _, event := range result.Events {
+		for _, bracket := range event.Brackets {
+			want := 1
+			if bracket.TournamentID == 1 {
+				want = 3 // Alice, Bob, and the entrant without a canonical identity.
+			}
+			if bracket.Entrants != want {
+				t.Fatalf("bracket %d: got %d entrants, want %d", bracket.TournamentID, bracket.Entrants, want)
+			}
+		}
 	}
 }
 

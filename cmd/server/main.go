@@ -99,6 +99,7 @@ type playerEventBracketResponse struct {
 	BraacketID   string `json:"braacketId,omitempty"`
 	Name         string `json:"name"`
 	URL          string `json:"url,omitempty"`
+	Entrants     int    `json:"entrants"`
 }
 
 type playerEventGroupResponse struct {
@@ -1349,12 +1350,14 @@ func loadPlayerEvents(db *sql.DB, playerID int, startDate string, endDate string
 
 	namePattern := buildTournamentNamePattern(tournamentNameLike)
 	rows, err := db.Query(`
-SELECT
+SELECT DISTINCT
   t.id,
   t.braacket_id,
   t.url,
   t.name,
-  t.tournament_date
+  t.tournament_date,
+  (SELECT COUNT(DISTINCT COALESCE('player:' || ep.canonical_player_id, 'entry:' || ep.id))
+   FROM tournament_players ep WHERE ep.tournament_id = t.id)
 FROM tournament_players tp
 JOIN tournaments t ON t.id = tp.tournament_id
 WHERE tp.canonical_player_id = ?
@@ -1375,6 +1378,7 @@ ORDER BY t.tournament_date DESC, t.id DESC`, playerID, startDate, endDate, nameP
 		url            sql.NullString
 		name           string
 		tournamentDate string
+		entrants       int
 	}
 
 	events := []playerEventGroupResponse{}
@@ -1382,7 +1386,7 @@ ORDER BY t.tournament_date DESC, t.id DESC`, playerID, startDate, endDate, nameP
 	totalBracketEntries := 0
 	for rows.Next() {
 		var row bracketRow
-		if err := rows.Scan(&row.tournamentID, &row.braacketID, &row.url, &row.name, &row.tournamentDate); err != nil {
+		if err := rows.Scan(&row.tournamentID, &row.braacketID, &row.url, &row.name, &row.tournamentDate, &row.entrants); err != nil {
 			return playerEventsResponse{}, err
 		}
 		totalBracketEntries += 1
@@ -1408,6 +1412,7 @@ ORDER BY t.tournament_date DESC, t.id DESC`, playerID, startDate, endDate, nameP
 			BraacketID:   row.braacketID.String,
 			Name:         row.name,
 			URL:          row.url.String,
+			Entrants:     row.entrants,
 		})
 		events[eventIndex].BracketCount = len(events[eventIndex].Brackets)
 	}
