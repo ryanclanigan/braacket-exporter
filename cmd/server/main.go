@@ -262,6 +262,7 @@ func main() {
 	mux.HandleFunc("/api/regions/unassign", server.handleUnassignRegion)
 	mux.HandleFunc("/api/regions/delete", server.handleDeleteRegion)
 	mux.HandleFunc("/api/player-events", server.handlePlayerEvents)
+	mux.HandleFunc("/api/attendance", server.handleAttendance)
 	mux.HandleFunc("/api/rankings", server.handleRankings)
 	mux.HandleFunc("/api/saved-rankings", server.handleSavedRankings)
 	mux.HandleFunc("/api/saved-rankings/", server.handleSavedRankingByID)
@@ -1357,7 +1358,8 @@ SELECT DISTINCT
   t.name,
   t.tournament_date,
   (SELECT COUNT(DISTINCT COALESCE('player:' || ep.canonical_player_id, 'entry:' || ep.id))
-   FROM tournament_players ep WHERE ep.tournament_id = t.id)
+   FROM tournament_players ep WHERE ep.tournament_id = t.id),
+  NOT (`+notDisqualified+`)
 FROM tournament_players tp
 JOIN tournaments t ON t.id = tp.tournament_id
 WHERE tp.canonical_player_id = ?
@@ -1379,19 +1381,24 @@ ORDER BY t.tournament_date DESC, t.id DESC`, playerID, startDate, endDate, nameP
 		name           string
 		tournamentDate string
 		entrants       int
+		disqualified   bool
 	}
 
 	events := []playerEventGroupResponse{}
 	indexByKey := map[string]int{}
+	disqualifiedEvents := map[string]bool{}
 	totalBracketEntries := 0
 	for rows.Next() {
 		var row bracketRow
-		if err := rows.Scan(&row.tournamentID, &row.braacketID, &row.url, &row.name, &row.tournamentDate, &row.entrants); err != nil {
+		if err := rows.Scan(&row.tournamentID, &row.braacketID, &row.url, &row.name, &row.tournamentDate, &row.entrants, &row.disqualified); err != nil {
 			return playerEventsResponse{}, err
 		}
 		totalBracketEntries += 1
 
 		eventKey := buildTournamentEventKey(row.tournamentDate, row.name)
+		if row.disqualified {
+			disqualifiedEvents[eventKey] = true
+		}
 		eventIndex, ok := indexByKey[eventKey]
 		if !ok {
 			events = append(events, playerEventGroupResponse{
@@ -1420,6 +1427,15 @@ ORDER BY t.tournament_date DESC, t.id DESC`, playerID, startDate, endDate, nameP
 		return playerEventsResponse{}, err
 	}
 
+	attended := events[:0]
+	for _, event := range events {
+		if disqualifiedEvents[buildTournamentEventKey(event.EventDate, event.EventName)] {
+			totalBracketEntries -= event.BracketCount
+			continue
+		}
+		attended = append(attended, event)
+	}
+	events = attended
 	return playerEventsResponse{
 		PlayerID:            playerID,
 		PlayerName:          playerName,

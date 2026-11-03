@@ -270,6 +270,7 @@ CREATE TABLE tournament_players (
   canonical_player_id INTEGER,
   name TEXT
 );
+CREATE TABLE matches (tournament_id INTEGER, player1_tournament_player_id INTEGER, player2_tournament_player_id INTEGER, player1_score INTEGER, player2_score INTEGER);
 INSERT INTO tournaments (id, braacket_id, url, league_slug, name, tournament_date, queue_state)
 VALUES
   (1, 'weekly-1-singles', 'https://braacket.com/tournament/weekly-1-singles', 'comelee', 'Weekly Wednesday #1 - Melee Singles', '2026-01-10', 'imported'),
