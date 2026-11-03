@@ -43,6 +43,7 @@
       const summary = document.querySelector("#ranking-summary");
       const rows = document.querySelector("#ranking-rows");
       const errorBox = document.querySelector("#ranking-error");
+      let rankingFilters = {};
 
       function escapeHTML(value) {
         return String(value ?? "")
@@ -108,7 +109,59 @@
           </div>`;
       }
 
+      function bracketLink(bracket, label) {
+        try {
+          const url = new URL(bracket.url);
+          if (["https:", "http:"].includes(url.protocol)) {
+            return `<a href="${escapeHTML(url.href)}" target="_blank" rel="noopener noreferrer">${escapeHTML(label)}</a>`;
+          }
+        } catch (_) {}
+        return escapeHTML(label);
+      }
+
+      function entrantCount(bracket) {
+        return Number.isInteger(bracket.entrants) && bracket.entrants >= 0
+          ? `<span class="ranking-event-count">${bracket.entrants} attendee${bracket.entrants === 1 ? "" : "s"}</span>`
+          : "";
+      }
+
+      async function loadPlayerEvents(detail) {
+        const panel = detail.querySelector(".ranking-events-content");
+        if (panel.dataset.state === "ready" || panel.dataset.state === "loading") return;
+        const playerId = Number(detail.dataset.playerId);
+        if (!Number.isInteger(playerId) || playerId < 1) {
+          panel.textContent = "Event history is unavailable for this player.";
+          return;
+        }
+        panel.dataset.state = "loading";
+        panel.setAttribute("aria-busy", "true");
+        panel.textContent = "Loading events…";
+        const params = new URLSearchParams({ ...rankingFilters, playerId: String(playerId) });
+        try {
+          const response = await fetch(`api/player-events?${params}`);
+          if (!response.ok) throw new Error("Could not load events.");
+          const data = await response.json();
+          const events = Array.isArray(data.events) ? data.events : [];
+          panel.innerHTML = events.length ? `<ul class="ranking-events-list" tabindex="0" aria-label="Events in ranking period">
+            ${events.map((event) => {
+              const brackets = Array.isArray(event.brackets) ? event.brackets : [];
+              const links = brackets.length === 1
+                ? bracketLink(brackets[0], event.eventName || brackets[0].name)
+                : `${escapeHTML(event.eventName)}<span class="ranking-event-brackets">${brackets.map((bracket) => `<span>${bracketLink(bracket, bracket.name)} ${entrantCount(bracket)}</span>`).join("")}</span>`;
+              return `<li><time datetime="${escapeHTML(event.eventDate)}">${escapeHTML(event.eventDate)}</time><span class="ranking-event-name">${links}</span>${brackets.length === 1 ? entrantCount(brackets[0]) : ""}</li>`;
+            }).join("")}</ul>` : "No events in this ranking period.";
+          panel.dataset.state = "ready";
+        } catch (_) {
+          panel.dataset.state = "error";
+          panel.innerHTML = `Could not load events. <button type="button" class="ranking-events-retry">Retry</button>`;
+        } finally {
+          panel.setAttribute("aria-busy", "false");
+        }
+      }
+
       function renderRankings(data, label = "") {
+        rankingFilters = { startDate: data.startDate, endDate: data.endDate };
+        if (data.tournamentNameLike) rankingFilters.tournamentNameLike = data.tournamentNameLike;
         const players = Array.isArray(data.players) ? data.players : [];
         summary.textContent = `${label}${data.system || "Colley"} rankings • ${data.startDate} to ${data.endDate} • ${data.minTournaments || 3}+ events`;
         rows.innerHTML = players.length
@@ -126,8 +179,14 @@
                     <td>${record.wins}–${record.losses}</td>
                     <td>${escapeHTML(events)}</td>
                   </tr>
-                  <tr class="ranking-detail-row" data-player-detail="${escapeHTML(playerKey)}" hidden>
-                    <td colspan="5">${renderH2H(player.records)}</td>
+                  <tr class="ranking-detail-row" data-player-detail="${escapeHTML(playerKey)}" data-player-id="${escapeHTML(player.canonicalPlayerId || "")}" hidden>
+                    <td colspan="5">
+                      <section class="ranking-events-panel" aria-label="Player events">
+                        <div class="ranking-h2h-heading"><strong>Events</strong><span class="muted">In this ranking period</span></div>
+                        <div class="ranking-events-content" aria-live="polite"></div>
+                      </section>
+                      ${renderH2H(player.records)}
+                    </td>
                   </tr>`;
                 }
               )
@@ -167,6 +226,10 @@
       });
 
       rows.addEventListener("click", (event) => {
+        if (event.target.closest(".ranking-events-retry")) {
+          loadPlayerEvents(event.target.closest(".ranking-detail-row"));
+          return;
+        }
         const row = event.target.closest(".public-ranking-row");
         if (!row) return;
         const detail = rows.querySelector(`[data-player-detail="${CSS.escape(row.dataset.playerKey)}"]`);
@@ -174,10 +237,11 @@
         const expanded = row.getAttribute("aria-expanded") === "true";
         row.setAttribute("aria-expanded", String(!expanded));
         detail.hidden = expanded;
+        if (!expanded) loadPlayerEvents(detail);
       });
 
       rows.addEventListener("keydown", (event) => {
-        if (event.key === "Enter" || event.key === " ") {
+        if (event.target.matches(".public-ranking-row") && (event.key === "Enter" || event.key === " ")) {
           event.preventDefault();
           event.target.closest(".public-ranking-row")?.click();
         }

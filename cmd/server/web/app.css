@@ -559,6 +559,61 @@ th {
   padding: 10px 2px 2px;
 }
 
+.ranking-events-panel {
+  padding: 10px 2px 2px;
+  font-size: 0.85rem;
+  max-width: calc(100vw - 64px);
+}
+
+.ranking-events-content {
+  margin-top: 6px;
+}
+
+.ranking-events-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.ranking-events-list li {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr) auto;
+  gap: 8px;
+  padding: 5px 2px;
+  border-bottom: 1px solid var(--line);
+}
+
+.ranking-events-list time {
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.ranking-event-name {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.ranking-event-brackets {
+  display: grid;
+  gap: 3px;
+  font-size: 0.78rem;
+}
+
+.ranking-event-count {
+  color: var(--ink-soft);
+  font-size: 0.75rem;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.ranking-events-retry {
+  padding: 2px 8px;
+  font-size: inherit;
+}
+
 .ranking-h2h-toolbar {
   display: flex;
   justify-content: space-between;
