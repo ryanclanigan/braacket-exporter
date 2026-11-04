@@ -8,7 +8,14 @@ import (
 	"time"
 )
 
+type matchupSet struct {
+	PlayerScore   *int64 `json:"playerScore"`
+	OpponentScore *int64 `json:"opponentScore"`
+	Won           bool   `json:"won"`
+}
+
 type matchupEvent struct {
+	Sets      []matchupSet                 `json:"sets"`
 	EventDate string                       `json:"eventDate"`
 	EventName string                       `json:"eventName"`
 	Wins      int                          `json:"wins"`
@@ -20,7 +27,9 @@ func loadMatchupEvents(db *sql.DB, playerID, opponentID int, opponentName, start
 	pattern := buildTournamentNamePattern(filter)
 	rows, err := db.Query(`SELECT t.id,t.name,t.tournament_date,t.url,
  other.canonical_player_id, winner.canonical_player_id,
- p.name,other.name
+ p.name,other.name,
+ CASE WHEN self.id=m.player1_tournament_player_id THEN m.player1_score ELSE m.player2_score END,
+ CASE WHEN self.id=m.player1_tournament_player_id THEN m.player2_score ELSE m.player1_score END
  FROM matches m
  JOIN tournaments t ON t.id=m.tournament_id
  JOIN tournament_players self ON self.id=m.player1_tournament_player_id OR self.id=m.player2_tournament_player_id
@@ -39,6 +48,7 @@ func loadMatchupEvents(db *sql.DB, playerID, opponentID int, opponentName, start
 	defer rows.Close()
 	type result struct {
 		tid, opponent, winner                     int
+		score, opponentScore                      sql.NullInt64
 		name, date, url, canonicalName, entryName string
 	}
 	results := []result{}
@@ -46,7 +56,7 @@ func loadMatchupEvents(db *sql.DB, playerID, opponentID int, opponentName, start
 	for rows.Next() {
 		var r result
 		var url sql.NullString
-		if err := rows.Scan(&r.tid, &r.name, &r.date, &url, &r.opponent, &r.winner, &r.canonicalName, &r.entryName); err != nil {
+		if err := rows.Scan(&r.tid, &r.name, &r.date, &url, &r.opponent, &r.winner, &r.canonicalName, &r.entryName, &r.score, &r.opponentScore); err != nil {
 			return nil, err
 		}
 		r.url = url.String
@@ -83,6 +93,16 @@ func loadMatchupEvents(db *sql.DB, playerID, opponentID int, opponentName, start
 			events = append(events, matchupEvent{EventDate: r.date, EventName: displayTournamentEventName(r.name), Brackets: []playerEventBracketResponse{}})
 		}
 		event := &events[index]
+		set := matchupSet{Won: r.winner == playerID}
+		if r.score.Valid {
+			value := r.score.Int64
+			set.PlayerScore = &value
+		}
+		if r.opponentScore.Valid {
+			value := r.opponentScore.Int64
+			set.OpponentScore = &value
+		}
+		event.Sets = append(event.Sets, set)
 		if r.winner == playerID {
 			event.Wins++
 		} else {

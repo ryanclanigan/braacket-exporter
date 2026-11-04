@@ -39,6 +39,15 @@ func TestMatchupEvents(t *testing.T) {
 	if reverse[1].Wins != 1 || reverse[1].Losses != 2 {
 		t.Fatalf("wrong perspective: %+v", reverse)
 	}
+	if len(events[1].Sets) != 3 || *events[1].Sets[0].PlayerScore != 3 || *events[1].Sets[0].OpponentScore != 2 {
+		t.Fatalf("expected individual 3-2 game score, got %+v", events[1].Sets)
+	}
+	if *reverse[1].Sets[0].PlayerScore != 2 || *reverse[1].Sets[0].OpponentScore != 3 {
+		t.Fatal("game scores did not reverse with player perspective")
+	}
+	if *events[0].Sets[0].PlayerScore != 0 || *events[0].Sets[0].OpponentScore != 2 {
+		t.Fatal("player-two perspective or shutout score is incorrect")
+	}
 	legacy, err := loadMatchupEvents(db, 1, 0, "Old Bob", "2026-01-01", "2026-01-31", "Weekly")
 	if err != nil {
 		t.Fatal(err)
@@ -56,6 +65,16 @@ func TestMatchupEvents(t *testing.T) {
 	}
 	if _, err = loadMatchupEvents(db, 1, 0, "Bob", "2026-01-01", "2026-01-31", ""); err == nil {
 		t.Fatal("ambiguous names should not combine opponents")
+	}
+	if _, err := db.Exec(`INSERT INTO matches VALUES (10,3,31,32,31,NULL,NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	missing, err := loadMatchupEvents(db, 1, 2, "", "2026-01-01", "2026-01-31", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if missing[0].Sets[0].PlayerScore != nil || missing[0].Sets[0].OpponentScore != nil || !missing[0].Sets[0].Won {
+		t.Fatal("missing scores must remain unknown, with winner preserved")
 	}
 	server := &app{dbPath: path}
 	for _, query := range []string{"", "?playerId=1&opponentId=1", "?playerId=1&opponentId=2&startDate=bad", "?playerId=1&opponentId=2&startDate=2026-02-01&endDate=2026-01-01"} {
