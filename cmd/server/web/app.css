@@ -987,3 +987,8 @@ th {
   margin: 8px 0;
   white-space: normal;
 }
+
+.ranking-matchup-set-score {
+  display: block;
+  font-variant-numeric: tabular-nums;
+}

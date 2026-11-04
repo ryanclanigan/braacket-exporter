@@ -158,12 +158,16 @@
           if (!response.ok) throw new Error("Could not load tournament records.");
           const data = await response.json();
           const events = Array.isArray(data.events) ? data.events : [];
-          panel.innerHTML = events.length ? `<p class="muted">Sets won–lost against ${escapeHTML(button.dataset.opponent)} in this ranking period.</p>
+          panel.innerHTML = events.length ? `<p class="muted">Game scores for each set against ${escapeHTML(button.dataset.opponent)}, from this player’s perspective.</p>
             <ul class="ranking-events-list" tabindex="0" aria-label="Head-to-head tournament records">${events.map((event) => {
               const brackets = Array.isArray(event.brackets) ? event.brackets : [];
               const links = brackets.length === 1 ? bracketLink(brackets[0], event.eventName)
                 : `${escapeHTML(event.eventName)}<span class="ranking-event-brackets">${brackets.map((bracket) => bracketLink(bracket, bracket.name)).join(" · ")}</span>`;
-              return `<li><time datetime="${escapeHTML(event.eventDate)}">${escapeHTML(event.eventDate)}</time><span class="ranking-event-name">${links}</span><strong>${escapeHTML(event.wins)}–${escapeHTML(event.losses)}</strong></li>`;
+              const scores = (event.sets || []).map((set) => {
+                const known = Number.isInteger(set.playerScore) && Number.isInteger(set.opponentScore);
+                return `<strong class="ranking-matchup-set-score">${known ? `${set.playerScore}–${set.opponentScore}` : `${set.won ? "Win" : "Loss"} (score unavailable)`}</strong>`;
+              }).join("");
+              return `<li><time datetime="${escapeHTML(event.eventDate)}">${escapeHTML(event.eventDate)}</time><span class="ranking-event-name">${links}</span><span>${scores || "Scores unavailable"}</span></li>`;
             }).join("")}</ul>` : "No played sets against this opponent in this ranking period.";
           panel.dataset.state = "ready";
         } catch (_) {
