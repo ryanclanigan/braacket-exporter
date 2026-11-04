@@ -950,3 +950,40 @@ th {
     grid-template-columns: 1fr;
   }
 }
+
+.ranking-matchup-toggle {
+  width: 100%;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ranking-matchup-toggle::after {
+  content: "+";
+  margin-left: auto;
+}
+
+.ranking-matchup-toggle[aria-expanded="true"]::after {
+  content: "−";
+}
+
+.ranking-matchup-toggle {
+  grid-template-columns: 34px minmax(0, auto) auto auto 1fr;
+}
+
+.ranking-matchup-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.ranking-matchup-events {
+  padding: 0 8px 8px;
+  max-width: calc(100vw - 64px);
+  font-size: .85rem;
+}
+
+.ranking-matchup-events p {
+  margin: 8px 0;
+  white-space: normal;
+}

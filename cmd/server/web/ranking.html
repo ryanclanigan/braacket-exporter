@@ -30,7 +30,7 @@
           <div><dt>32+ entrants</dt><dd>2 points</dd></div>
         </dl>
         <p><strong>Winner bonus:</strong> +1 point when you win an event with 32+ entrants.</p>
-        <p><strong>Series cap:</strong> 8 points per tournament series, including win bonuses. All Foco Weekly Wednesdays count toward the same cap.</p>
+        <p><strong>Series cap:</strong> 8 points per tournament series, including win bonuses. E.g. all Foco Weekly Wednesdays count toward the same cap.</p>
         <p class="muted">Events where you were DQed do not count.</p>
       </aside>
       <section class="public-ranking-card" aria-live="polite">
@@ -113,11 +113,14 @@
             <div class="ranking-h2h-heading"><strong>Head To Head</strong><span class="muted">${opponents.length} opponent${opponents.length === 1 ? "" : "s"}</span></div>
             <div class="ranking-h2h-list">
               ${opponents.map((record) => `
-                <div class="ranking-h2h-item" style="--h2h-bg: ${recordColor(record)}">
-                  <div class="ranking-h2h-rank">${Number(record.opponentRank) > 0 ? `#${escapeHTML(record.opponentRank)}` : "UR"}</div>
-                  <div class="ranking-h2h-opponent"><strong>${escapeHTML(record.opponent || "Unknown")}</strong></div>
-                  <div class="ranking-h2h-score"><span class="wins">${escapeHTML(record.wins || 0)}</span><span class="muted">-</span><span class="losses">${escapeHTML(record.losses || 0)}</span></div>
-                  <div class="ranking-h2h-summary muted">${Number(record.wins || 0) + Number(record.losses || 0)} set${Number(record.wins || 0) + Number(record.losses || 0) === 1 ? "" : "s"}</div>
+                <div class="ranking-matchup">
+                <button type="button" class="ranking-h2h-item ranking-matchup-toggle" aria-expanded="false" data-opponent="${escapeHTML(record.opponent)}" data-opponent-id="${escapeHTML(record.opponentPlayerId || "")}" style="--h2h-bg: ${recordColor(record)}">
+                  <span class="ranking-h2h-rank">${Number(record.opponentRank) > 0 ? `#${escapeHTML(record.opponentRank)}` : "UR"}</span>
+                  <span class="ranking-h2h-opponent"><strong>${escapeHTML(record.opponent || "Unknown")}</strong></span>
+                  <span class="ranking-h2h-score"><span class="wins">${escapeHTML(record.wins || 0)}</span><span class="muted">-</span><span class="losses">${escapeHTML(record.losses || 0)}</span></span>
+                  <span class="ranking-h2h-summary muted">${Number(record.wins || 0) + Number(record.losses || 0)} set${Number(record.wins || 0) + Number(record.losses || 0) === 1 ? "" : "s"}</span>
+                </button>
+                <div class="ranking-matchup-events" hidden aria-live="polite"></div>
                 </div>
               `).join("")}
             </div>
@@ -138,6 +141,37 @@
         return Number.isInteger(bracket.entrants) && bracket.entrants >= 0
           ? `<span class="ranking-event-count">${bracket.entrants} attendee${bracket.entrants === 1 ? "" : "s"}</span>`
           : "";
+      }
+
+      async function loadMatchupEvents(matchup) {
+        const panel = matchup.querySelector(".ranking-matchup-events");
+        if (["ready", "loading"].includes(panel.dataset.state)) return;
+        const button = matchup.querySelector(".ranking-matchup-toggle");
+        const playerId = matchup.closest(".ranking-detail-row").dataset.playerId;
+        const params = new URLSearchParams({ ...rankingFilters, playerId, opponent: button.dataset.opponent });
+        if (button.dataset.opponentId) params.set("opponentId", button.dataset.opponentId);
+        panel.dataset.state = "loading";
+        panel.setAttribute("aria-busy", "true");
+        panel.textContent = "Loading tournament records…";
+        try {
+          const response = await fetch(`api/matchup-events?${params}`);
+          if (!response.ok) throw new Error("Could not load tournament records.");
+          const data = await response.json();
+          const events = Array.isArray(data.events) ? data.events : [];
+          panel.innerHTML = events.length ? `<p class="muted">Sets won–lost against ${escapeHTML(button.dataset.opponent)} in this ranking period.</p>
+            <ul class="ranking-events-list" tabindex="0" aria-label="Head-to-head tournament records">${events.map((event) => {
+              const brackets = Array.isArray(event.brackets) ? event.brackets : [];
+              const links = brackets.length === 1 ? bracketLink(brackets[0], event.eventName)
+                : `${escapeHTML(event.eventName)}<span class="ranking-event-brackets">${brackets.map((bracket) => bracketLink(bracket, bracket.name)).join(" · ")}</span>`;
+              return `<li><time datetime="${escapeHTML(event.eventDate)}">${escapeHTML(event.eventDate)}</time><span class="ranking-event-name">${links}</span><strong>${escapeHTML(event.wins)}–${escapeHTML(event.losses)}</strong></li>`;
+            }).join("")}</ul>` : "No played sets against this opponent in this ranking period.";
+          panel.dataset.state = "ready";
+        } catch (_) {
+          panel.dataset.state = "error";
+          panel.innerHTML = 'Could not load tournament records. <button type="button" class="ranking-matchup-retry">Retry</button>';
+        } finally {
+          panel.setAttribute("aria-busy", "false");
+        }
       }
 
       async function loadPlayerEvents(detail) {
@@ -264,6 +298,19 @@
       });
 
       rows.addEventListener("click", (event) => {
+        if (event.target.closest(".ranking-matchup-retry")) {
+          loadMatchupEvents(event.target.closest(".ranking-matchup"));
+          return;
+        }
+        const matchupButton = event.target.closest(".ranking-matchup-toggle");
+        if (matchupButton) {
+          const matchup = matchupButton.closest(".ranking-matchup");
+          const expanded = matchupButton.getAttribute("aria-expanded") === "true";
+          matchupButton.setAttribute("aria-expanded", String(!expanded));
+          matchup.querySelector(".ranking-matchup-events").hidden = expanded;
+          if (!expanded) loadMatchupEvents(matchup);
+          return;
+        }
         if (event.target.closest(".ranking-attendance-retry")) {
           loadAttendancePoints();
           return;
