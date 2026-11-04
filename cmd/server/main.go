@@ -262,6 +262,7 @@ func main() {
 	mux.HandleFunc("/api/regions/unassign", server.handleUnassignRegion)
 	mux.HandleFunc("/api/regions/delete", server.handleDeleteRegion)
 	mux.HandleFunc("/api/player-events", server.handlePlayerEvents)
+	mux.HandleFunc("/api/matchup-events", server.handleMatchupEvents)
 	mux.HandleFunc("/api/attendance", server.handleAttendance)
 	mux.HandleFunc("/api/rankings", server.handleRankings)
 	mux.HandleFunc("/api/saved-rankings", server.handleSavedRankings)

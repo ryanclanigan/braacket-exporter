@@ -207,10 +207,11 @@ func ComputeExport(dbPath string, startDate string, endDate string, minimumTourn
 			totalSets += sets
 			weightedOpponentScore += ratingByPlayerID[entry.opponentPlayerID] * float64(sets)
 			records = append(records, map[string]interface{}{
-				"wins":         entry.wins,
-				"losses":       entry.losses,
-				"opponent":     entry.opponent,
-				"opponentRank": rankByPlayerID[entry.opponentPlayerID],
+				"wins":             entry.wins,
+				"losses":           entry.losses,
+				"opponent":         entry.opponent,
+				"opponentPlayerId": entry.opponentPlayerID,
+				"opponentRank":     rankByPlayerID[entry.opponentPlayerID],
 			})
 		}
 		strengthOfSchedule := 0.0
