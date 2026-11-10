@@ -1018,3 +1018,10 @@ th {
   .matchup-picker { padding: 16px; }
   .matchup-picker-form label { flex-basis: 100%; }
 }
+
+.matchup-picker-field { flex: 1 1 240px; min-width: 0; display: grid; gap: 8px; }
+.matchup-picker-field input { width: 100%; min-width: 0; }
+.matchup-search-status { font-size: .8rem; }
+@media (max-width: 640px) {
+  .matchup-picker-field { flex-basis: 100%; }
+}

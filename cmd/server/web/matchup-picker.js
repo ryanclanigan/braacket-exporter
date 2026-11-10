@@ -3,8 +3,11 @@ window.createMatchupPicker = function (root) {
   const escape = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   root.innerHTML = `<h3>Head to head</h3><p class="muted matchup-scope">Load a ranking to compare two players.</p>
     <form class="matchup-picker-form">
-      <label>Player 1<select name="player" required disabled><option value="">Select a player</option></select></label>
-      <label>Player 2<select name="opponent" required disabled><option value="">Select a player</option></select></label>
+      ${['player', 'opponent'].map((field, index) => `<div class="matchup-picker-field">
+        <label>Search for player ${index + 1}<input type="search" name="${field}Search" placeholder="Search all players…" autocomplete="off" disabled></label>
+        <label>Player ${index + 1}<select name="${field}" required disabled><option value="">Select a player</option></select></label>
+        <span class="muted matchup-search-status" aria-live="polite"></span>
+      </div>`).join('')}
       <button type="submit" disabled>Compare</button>
     </form><div class="matchup-picker-result" aria-live="polite"></div>`;
   const form = root.querySelector('form');
@@ -13,6 +16,8 @@ window.createMatchupPicker = function (root) {
   const result = root.querySelector('.matchup-picker-result');
   const scope = root.querySelector('.matchup-scope');
   let signature = '', filters = {}, generation = 0, request = 0, lastData;
+  let rankedOptions = '', rosterReady = false;
+  const searches = [];
 
   function clearComparison() {
     request++;
@@ -21,13 +26,51 @@ window.createMatchupPicker = function (root) {
     submit.disabled = !first.value || !second.value || first.value === second.value;
     if (first.value && first.value === second.value) result.textContent = 'Select two different players.';
   }
+  for (const field of ['player', 'opponent']) {
+    const input = form.elements[`${field}Search`], select = form.elements[field];
+    const status = input.closest('.matchup-picker-field').querySelector('.matchup-search-status');
+    const state = {input, select, status, timer:0, version:0};
+    searches.push(state);
+    function resetOptions(options) {
+      select.innerHTML = '<option value="">Select a player</option>' + options;
+      select.disabled = !options;
+    }
+    input.addEventListener('input', () => {
+      clearTimeout(state.timer);
+      const version = ++state.version, ranking = generation;
+      resetOptions('');
+      clearComparison();
+      const query = input.value.trim();
+      if (!query) {
+        resetOptions(rankedOptions);
+        status.textContent = rosterReady ? 'Ranked players shown. Search to find anyone else.' : 'Loading ranked players…';
+        return;
+      }
+      status.textContent = 'Searching all players…';
+      state.timer = setTimeout(async () => {
+        try {
+          const response = await fetch(`api/players?${new URLSearchParams({search:query,limit:50})}`);
+          if (!response.ok) throw new Error('Search failed');
+          const data = await response.json();
+          if (version !== state.version || ranking !== generation) return;
+          const players = data.results || [];
+          resetOptions(players.map((p) => `<option value="${Number(p.canonicalPlayerId)}">${escape(p.name)}${players.filter((other) => other.name === p.name).length > 1 ? ` · ${Number(p.tournaments)} events · ID ${Number(p.canonicalPlayerId)}` : ""}</option>`).join(''));
+          // Keep the name separate from the disambiguating ID for the comparison heading.
+          players.forEach((p, index) => {select.options[index + 1].dataset.name = p.name;});
+          status.textContent = players.length ? `${players.length} matches${players.length === 50 ? ' · Refine your search for more specific results' : ''}. Select a player below.` : 'No matching players. Try another name.';
+        } catch (_) {
+          if (version === state.version && ranking === generation) status.textContent = 'Search failed. Edit your search to retry.';
+        }
+      }, 250);
+    });
+  }
   form.addEventListener('change', clearComparison);
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     if (submit.disabled) return;
     const current = ++request;
-    const name = first.selectedOptions[0].textContent;
-    const opponent = second.selectedOptions[0].textContent;
+    const name = first.selectedOptions[0].dataset.name || first.selectedOptions[0].textContent;
+    const opponent = second.selectedOptions[0].dataset.name || second.selectedOptions[0].textContent;
     result.textContent = 'Loading head-to-head…';
     result.setAttribute('aria-busy', 'true');
     const params = new URLSearchParams({...filters, playerId:first.value, opponentId:second.value});
@@ -73,12 +116,18 @@ window.createMatchupPicker = function (root) {
     lastData = data;
     const current = ++generation;
     clearComparison();
+    rankedOptions = ''; rosterReady = false;
+    for (const state of searches) {
+      clearTimeout(state.timer); state.version++;
+      state.input.value = ''; state.input.disabled = data.status !== 'ready';
+      state.status.textContent = data.status === 'ready' ? 'Loading ranked players…' : '';
+    }
     first.disabled = second.disabled = submit.disabled = true;
     first.innerHTML = second.innerHTML = '<option value="">Select a player</option>';
     if (data.status !== 'ready') { scope.textContent = 'Load a ranking to compare two players.'; return; }
     filters = {startDate:data.startDate, endDate:data.endDate};
     if (data.tournamentNameLike) filters.tournamentNameLike = data.tournamentNameLike;
-    scope.textContent = `${data.startDate} to ${data.endDate}${data.tournamentNameLike ? ` · ${data.tournamentNameLike}` : ''} · Players from this ranking`;
+    scope.textContent = `${data.startDate} to ${data.endDate}${data.tournamentNameLike ? ` · ${data.tournamentNameLike}` : ''} · Compare any two players`;
     result.textContent = 'Loading players…';
     try {
       let players = data.players || [];
@@ -102,10 +151,14 @@ window.createMatchupPicker = function (root) {
       const unique = [...new Map(players.filter((p) => Number(p.canonicalPlayerId)>0).map((p) => [String(p.canonicalPlayerId),p])).values()];
       unique.sort((a,b) => a.name.localeCompare(b.name));
       const options = unique.map((p) => `<option value="${Number(p.canonicalPlayerId)}">${escape(p.name)}</option>`).join('');
-      first.innerHTML += options;
-      second.innerHTML += options;
-      first.disabled = second.disabled = unique.length < 2;
-      result.textContent = unique.length < 2 ? 'At least two ranked players are needed to compare.' : 'Select two players to see their head-to-head.';
+      rankedOptions = options; rosterReady = true;
+      for (const state of searches) {
+        if (state.input.value.trim()) continue;
+        state.select.innerHTML = '<option value="">Select a player</option>' + options;
+        state.select.disabled = !unique.length;
+        state.status.textContent = 'Ranked players shown. Search to find anyone else.';
+      }
+      if (!first.value && !second.value) result.textContent = 'Select ranked players or search the full player database.';
     } catch (_) {
       if (current === generation) result.innerHTML = 'Could not load players. <button type="button" class="matchup-picker-retry">Retry</button>';
     }
