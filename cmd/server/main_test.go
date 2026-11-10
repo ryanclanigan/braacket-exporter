@@ -81,6 +81,31 @@ VALUES (101, 11, 12);
 	}
 }
 
+func TestPlayerSearchPrioritizesExactNames(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "search.sqlite")
+	setupSQLiteFixture(t, path, `
+ CREATE TABLE players (id INTEGER, name TEXT, braacket_league_player_id TEXT);
+ CREATE TABLE tournament_players (id INTEGER, tournament_id INTEGER, canonical_player_id INTEGER);
+ CREATE TABLE matches (id INTEGER, player1_tournament_player_id INTEGER, player2_tournament_player_id INTEGER);
+ INSERT INTO players VALUES (1,'E',NULL),(2,'Else',NULL),(3,'Alice',NULL);
+ INSERT INTO tournament_players VALUES (1,1,3),(2,2,3),(3,1,2);`)
+	server := &app{dbPath: path}
+	recorder := httptest.NewRecorder()
+	server.handlePlayers(recorder, httptest.NewRequest(http.MethodGet, "/api/players?search=e&limit=2", nil))
+	if recorder.Code != 200 {
+		t.Fatal(recorder.Body.String())
+	}
+	var response struct {
+		Results []playerSearchResult `json:"results"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Results) != 2 || response.Results[0].Name != "E" || response.Results[1].Name != "Else" {
+		t.Fatalf("exact and prefix matches must precede more active substring matches: %+v", response.Results)
+	}
+}
+
 func TestHandleRankingsUnsupportedSystem(t *testing.T) {
 	server := &app{}
 

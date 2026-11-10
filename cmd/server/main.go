@@ -384,8 +384,9 @@ LEFT JOIN matches m
   OR m.player2_tournament_player_id = tp.id
 WHERE p.name LIKE ?
 GROUP BY p.id, p.name, p.braacket_league_player_id, r.slug, r.name
-ORDER BY tournaments DESC, matches DESC, p.name ASC
-LIMIT ?`, searchPattern, limit)
+ORDER BY CASE WHEN p.name = ? COLLATE NOCASE THEN 0 WHEN p.name LIKE ? THEN 1 ELSE 2 END,
+ tournaments DESC, matches DESC, p.name ASC
+LIMIT ?`, searchPattern, search, search+"%", limit)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
