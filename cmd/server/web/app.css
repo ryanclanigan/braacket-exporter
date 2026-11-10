@@ -993,3 +993,28 @@ th {
   display: block;
   font-variant-numeric: tabular-nums;
 }
+
+.matchup-picker {
+  min-width: 0;
+  padding: 20px;
+  margin-bottom: 24px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+}
+
+.matchup-picker h3 { margin: 0; font-size: 1.2rem; }
+.matchup-picker-form {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.matchup-picker-form label { flex: 1 1 180px; min-width: 0; display: grid; gap: 6px; }
+.matchup-picker-form select { width: 100%; min-width: 0; }
+.matchup-picker-result { margin-top: 12px; }
+.matchup-picker-result .ranking-events-list { max-height: 300px; }
+@media (max-width: 640px) {
+  .matchup-picker { padding: 16px; }
+  .matchup-picker-form label { flex-basis: 100%; }
+}

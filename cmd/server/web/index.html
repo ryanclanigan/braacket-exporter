@@ -101,6 +101,7 @@
               <button type="submit" class="button-primary">Load Rankings</button>
             </form>
 
+            <section id="ranking-matchup-picker" class="matchup-picker" aria-label="Compare two ranked players"></section>
             <div id="ranking-meta" class="callout"></div>
             <div id="ranking-table-wrap" class="table-wrap">
               <table>
@@ -358,7 +359,9 @@
       </main>
     </div>
 
+    <script src="matchup-picker.js"></script>
     <script type="module">
+      const matchupPicker = createMatchupPicker(document.querySelector("#ranking-matchup-picker"));
       const overviewCards = document.querySelector("#overview-cards");
       const syncSummary = document.querySelector("#sync-summary");
       const syncStateCards = document.querySelector("#sync-state-cards");
@@ -743,6 +746,7 @@
       }
 
       function renderRankingResponse(data) {
+        void matchupPicker.update(data.status === "ready" && data.source === "saved" ? rankingState.savedSnapshot : data);
         if (data.status !== "ready") {
           rankingMeta.innerHTML = `<div class="warning">${data.message || "Ranking system not available."}</div>`;
           rankingRows.innerHTML = "";

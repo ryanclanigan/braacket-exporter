@@ -20,6 +20,7 @@
         <p id="ranking-summary" class="muted">Loading rankings…</p>
       </header>
 
+      <section id="ranking-matchup-picker" class="matchup-picker" aria-label="Compare two ranked players"></section>
       <div class="public-ranking-layout">
       <aside class="ranking-attendance-guide" aria-labelledby="attendance-guide-title">
         <h2 id="attendance-guide-title">Attendance points</h2>
@@ -54,7 +55,9 @@
       </div>
     </main>
 
+    <script src="matchup-picker.js"></script>
     <script>
+      const matchupPicker = createMatchupPicker(document.querySelector("#ranking-matchup-picker"));
       const summary = document.querySelector("#ranking-summary");
       const rows = document.querySelector("#ranking-rows");
       const errorBox = document.querySelector("#ranking-error");
@@ -234,6 +237,7 @@
       }
 
       function renderRankings(data, label = "") {
+        void matchupPicker.update(data);
         rankingFilters = { startDate: data.startDate, endDate: data.endDate };
         if (data.tournamentNameLike) rankingFilters.tournamentNameLike = data.tournamentNameLike;
         const players = Array.isArray(data.players) ? data.players : [];
